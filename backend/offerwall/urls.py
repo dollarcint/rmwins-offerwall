@@ -65,6 +65,11 @@ urlpatterns = [
         name="publisher-section",
     ),
     path(
+        "publisher/respondents/<uuid:respondent_id>/action/",
+        views.publisher_respondent_action,
+        name="publisher-respondent-action",
+    ),
+    path(
         "publisher/withdrawals/",
         views.publisher_request_withdrawal,
         name="publisher-withdrawal",

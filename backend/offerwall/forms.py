@@ -7,7 +7,7 @@ from django.core.exceptions import ValidationError
 
 from surveys.models import Survey
 
-from .models import PlacementEventPostback, Publisher, PublisherPlacement
+from .models import PlacementEventPostback, Publisher, PublisherPlacement, RespondentProfile
 from .security import generate_signing_secret
 
 
@@ -427,6 +427,78 @@ class PlacementEventPostbackForm(forms.ModelForm):
             if duplicate.exists():
                 raise ValidationError("A postback already exists for this survey and event.")
         return cleaned
+
+
+class RespondentOnboardingForm(forms.Form):
+    full_name = forms.CharField(
+        max_length=160,
+        label="Full name",
+        widget=forms.TextInput(
+            attrs={"autocomplete": "name", "placeholder": "Enter your full name"}
+        ),
+    )
+    email = forms.EmailField(
+        max_length=254,
+        widget=forms.EmailInput(
+            attrs={"autocomplete": "email", "placeholder": "you@example.com"}
+        ),
+    )
+    age = forms.IntegerField(
+        min_value=18,
+        max_value=100,
+        widget=forms.NumberInput(
+            attrs={"inputmode": "numeric", "min": "18", "max": "100", "placeholder": "Age"}
+        ),
+    )
+    gender = forms.ChoiceField(
+        choices=RespondentProfile.Gender.choices,
+        widget=forms.Select,
+    )
+    consent = forms.BooleanField(
+        label="I agree that these details may be used for survey matching, verification and rewards."
+    )
+
+    def __init__(self, *args, publisher=None, profile=None, **kwargs):
+        self.publisher = publisher
+        self.profile = profile
+        super().__init__(*args, **kwargs)
+
+    def clean_email(self):
+        from .respondent_security import normalize_respondent_email, respondent_email_hash
+
+        email = normalize_respondent_email(self.cleaned_data["email"])
+        if self.publisher:
+            matches = RespondentProfile.objects.filter(
+                publisher=self.publisher,
+                email_hash=respondent_email_hash(email),
+            )
+            if self.profile:
+                matches = matches.exclude(pk=self.profile.pk)
+            if matches.exists():
+                raise ValidationError("This email is already linked to another respondent ID.")
+        return email
+
+
+class RespondentVerificationForm(forms.Form):
+    code = forms.CharField(
+        min_length=6,
+        max_length=6,
+        label="Verification code",
+        widget=forms.TextInput(
+            attrs={
+                "autocomplete": "one-time-code",
+                "inputmode": "numeric",
+                "pattern": "[0-9]{6}",
+                "placeholder": "6-digit code",
+            }
+        ),
+    )
+
+    def clean_code(self):
+        code = str(self.cleaned_data["code"] or "").strip()
+        if not code.isdigit():
+            raise ValidationError("Enter the 6-digit code from your email.")
+        return code
 
     def save(self, commit=True):
         instance = super().save(commit=False)

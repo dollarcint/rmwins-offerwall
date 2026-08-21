@@ -114,6 +114,33 @@ OFFERWALL_PORTAL_SESSION_TTL_SECONDS = max(
 OFFERWALL_MINIMUM_PAYOUT = max(
     Decimal("0.01"), Decimal(os.getenv("OFFERWALL_MINIMUM_PAYOUT", "50.00"))
 )
+OFFERWALL_VERIFICATION_TTL_SECONDS = max(
+    300, int(os.getenv("OFFERWALL_VERIFICATION_TTL_SECONDS", "900"))
+)
+OFFERWALL_VERIFICATION_RESEND_SECONDS = max(
+    30, int(os.getenv("OFFERWALL_VERIFICATION_RESEND_SECONDS", "60"))
+)
+OFFERWALL_VERIFICATION_MAX_ATTEMPTS = max(
+    3, int(os.getenv("OFFERWALL_VERIFICATION_MAX_ATTEMPTS", "5"))
+)
+OFFERWALL_RESPONDENT_STATE_TTL_SECONDS = max(
+    OFFERWALL_VERIFICATION_TTL_SECONDS,
+    int(os.getenv("OFFERWALL_RESPONDENT_STATE_TTL_SECONDS", "7200")),
+)
+
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"
+).strip()
+EMAIL_HOST = os.getenv("EMAIL_HOST", "127.0.0.1").strip()
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "25"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "").strip()
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", False)
+EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)
+EMAIL_TIMEOUT = max(2, int(os.getenv("EMAIL_TIMEOUT", "10")))
+DEFAULT_FROM_EMAIL = os.getenv(
+    "DEFAULT_FROM_EMAIL", "RM Wins Insights <no-reply@rmwinsights.com>"
+).strip()
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",

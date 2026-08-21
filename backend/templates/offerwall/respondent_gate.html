@@ -1,0 +1,64 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}{% if mode == 'verify' %}Verify email{% elif mode == 'banned' %}Access paused{% else %}Create respondent profile{% endif %} · RM Wins{% endblock %}
+{% block content %}
+<section class="ow-respondent-gate">
+  <div class="ow-respondent-card">
+    <header>
+      <span class="ow-respondent-mark" aria-hidden="true">◎</span>
+      <div><small>{{ placement.publisher.name }}</small><h1>{% if mode == 'verify' %}Verify your email{% elif mode == 'banned' %}Account access paused{% else %}Tell us about yourself{% endif %}</h1></div>
+    </header>
+
+    {% if mode == 'register' %}
+      <p class="ow-respondent-intro">Create your respondent profile before viewing available surveys. Your answers help us match relevant opportunities.</p>
+      <form method="post" class="ow-respondent-form" novalidate>
+        <input type="hidden" name="action" value="register">
+        <input type="hidden" name="respondent_state" value="{{ respondent_state }}">
+        {{ form.non_field_errors }}
+        <label><span>Full name</span>{{ form.full_name }}{{ form.full_name.errors }}</label>
+        <label><span>Email address</span>{{ form.email }}{{ form.email.errors }}</label>
+        <div class="ow-respondent-grid">
+          <label><span>Age</span>{{ form.age }}{{ form.age.errors }}</label>
+          <label><span>Gender</span>{{ form.gender }}{{ form.gender.errors }}</label>
+        </div>
+        <label class="ow-respondent-consent">{{ form.consent }}<span>{{ form.consent.label }}</span></label>{{ form.consent.errors }}
+        <button type="submit">Continue to email verification</button>
+      </form>
+      <p class="ow-respondent-privacy">Your name and email are encrypted at rest. The supplier can view this profile for respondent support, fraud prevention and account management.</p>
+    {% elif mode == 'verify' %}
+      <p class="ow-respondent-intro">Enter the 6-digit code sent to <strong>{{ respondent.masked_email }}</strong>. Verification is required before survey access.</p>
+      {% if notice %}<div class="ow-respondent-notice">{{ notice }}</div>{% endif %}
+      <form method="post" class="ow-respondent-form ow-verification-form" novalidate>
+        <input type="hidden" name="action" value="verify">
+        <input type="hidden" name="respondent_state" value="{{ respondent_state }}">
+        <label><span>Verification code</span>{{ form.code }}{{ form.code.errors }}</label>
+        <button type="submit">Verify and view surveys</button>
+      </form>
+      <div class="ow-respondent-secondary-actions">
+        <form method="post"><input type="hidden" name="action" value="resend"><input type="hidden" name="respondent_state" value="{{ respondent_state }}"><button type="submit">Resend code</button></form>
+        <a href="{{ request.path }}?SID={{ external_user_id|urlencode }}&amp;edit=1">Change details</a>
+      </div>
+    {% else %}
+      <p class="ow-respondent-intro">This account has been blocked by {{ placement.publisher.name }} and cannot access surveys.</p>
+      {% if respondent.ban_reason %}<div class="ow-respondent-notice">Reason: {{ respondent.ban_reason }}</div>{% endif %}
+      <p class="ow-respondent-privacy">Contact the supplier if you believe this action was taken in error.</p>
+    {% endif %}
+    <footer><span>Respondent ID</span><code>{{ external_user_id }}</code></footer>
+  </div>
+</section>
+<script>
+(() => {
+  if (window.parent === window) return;
+  let parentOrigin;
+  const configuredOrigin = '{{ respondent_parent_origin|escapejs }}';
+  try { parentOrigin = configuredOrigin || new URL(document.referrer).origin; } catch (error) { return; }
+  if (!/^https?:\/\//.test(parentOrigin)) return;
+  const sendHeight = () => window.parent.postMessage(
+    {type: 'rmw:resize', appId: '{{ placement.app_id|escapejs }}', height: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)},
+    parentOrigin
+  );
+  window.addEventListener('load', sendHeight);
+  if ('ResizeObserver' in window) new ResizeObserver(sendHeight).observe(document.body);
+  sendHeight();
+})();
+</script>
+{% endblock %}

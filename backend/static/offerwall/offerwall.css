@@ -3895,6 +3895,298 @@ a {
   }
 }
 
+.ow-respondent-gate {
+  min-height: calc(100vh - 180px);
+  display: grid;
+  place-items: center;
+  padding: 30px 18px;
+}
+.ow-respondent-card {
+  width: min(660px, 100%);
+  border: 1px solid #dce5ef;
+  border-radius: 24px;
+  padding: 34px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(18, 34, 60, 0.12);
+}
+.ow-respondent-card > header {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+.ow-respondent-mark {
+  width: 50px;
+  height: 50px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 16px;
+  color: #fff;
+  background: linear-gradient(145deg, #123d70, #147f9a);
+  font-size: 24px;
+}
+.ow-respondent-card header small {
+  color: #12849a;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ow-respondent-card h1 {
+  margin: 4px 0 0;
+  color: #142844;
+  font-size: clamp(25px, 4vw, 34px);
+}
+.ow-respondent-intro,
+.ow-respondent-privacy {
+  color: #66778c;
+  line-height: 1.65;
+}
+.ow-respondent-intro {
+  margin: 22px 0;
+}
+.ow-respondent-privacy {
+  margin: 18px 0 0;
+  font-size: 12px;
+}
+.ow-respondent-form {
+  display: grid;
+  gap: 16px;
+}
+.ow-respondent-form label:not(.ow-respondent-consent) {
+  display: grid;
+  gap: 7px;
+  color: #34465e;
+  font-size: 13px;
+  font-weight: 800;
+}
+.ow-respondent-form input:not([type="checkbox"]),
+.ow-respondent-form select {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid #ccd8e5;
+  border-radius: 10px;
+  padding: 0 13px;
+  color: #142844;
+  background: #fff;
+  font: inherit;
+}
+.ow-respondent-form input:focus,
+.ow-respondent-form select:focus {
+  border-color: #168da2;
+  outline: 3px solid rgba(22, 141, 162, 0.12);
+}
+.ow-respondent-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.ow-respondent-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: #586a81;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ow-respondent-consent input {
+  margin-top: 3px;
+}
+.ow-respondent-form button {
+  min-height: 49px;
+  border: 0;
+  border-radius: 10px;
+  color: #fff;
+  background: #123d70;
+  cursor: pointer;
+  font-weight: 850;
+}
+.ow-respondent-form .errorlist {
+  margin: 0;
+  padding: 0;
+  color: #b33248;
+  list-style: none;
+  font-size: 12px;
+  font-weight: 650;
+}
+.ow-verification-form input {
+  text-align: center;
+  letter-spacing: 0.38em;
+  font-size: 22px !important;
+  font-weight: 850 !important;
+}
+.ow-respondent-notice {
+  margin: 0 0 18px;
+  border: 1px solid #bee7dc;
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: #176b58;
+  background: #effaf7;
+  font-size: 13px;
+}
+.ow-respondent-secondary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+}
+.ow-respondent-secondary-actions form {
+  margin: 0;
+}
+.ow-respondent-secondary-actions button,
+.ow-respondent-secondary-actions a {
+  border: 0;
+  padding: 0;
+  color: #126b80;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+}
+.ow-respondent-card > footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 22px;
+  border-top: 1px solid #e5ebf1;
+  padding-top: 15px;
+  color: #75849a;
+  font-size: 12px;
+}
+.ow-respondent-card > footer code {
+  overflow-wrap: anywhere;
+  color: #283e5c;
+}
+.ow-respondent-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 22px 0;
+}
+.ow-respondent-stats article {
+  border: 1px solid #e0e6ed;
+  border-radius: 13px;
+  padding: 18px;
+  background: #fff;
+}
+.ow-respondent-stats span {
+  display: block;
+  color: #6c7a8f;
+  font-size: 12px;
+}
+.ow-respondent-stats strong {
+  display: block;
+  margin-top: 8px;
+  color: #173555;
+  font-size: 27px;
+}
+.ow-respondent-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 190px auto;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.ow-respondent-filters input,
+.ow-respondent-filters select,
+.ow-respondent-filters button {
+  min-height: 44px;
+  border: 1px solid #d9e1e9;
+  border-radius: 9px;
+  padding: 0 12px;
+  background: #fff;
+}
+.ow-respondent-filters button {
+  border-color: #123d70;
+  color: #fff;
+  background: #123d70;
+  cursor: pointer;
+  font-weight: 800;
+}
+.ow-respondent-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #e0e6ed;
+  border-radius: 13px;
+  background: #fff;
+}
+.ow-respondent-table {
+  width: 100%;
+  min-width: 1120px;
+  border-collapse: collapse;
+}
+.ow-respondent-table th,
+.ow-respondent-table td {
+  border-bottom: 1px solid #edf1f5;
+  padding: 14px;
+  text-align: left;
+  vertical-align: top;
+  font-size: 12px;
+}
+.ow-respondent-table th {
+  color: #617188;
+  background: #f7f9fb;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ow-respondent-table td > strong,
+.ow-respondent-table td > span,
+.ow-respondent-table td > small,
+.ow-respondent-table td > code {
+  display: block;
+  margin-bottom: 4px;
+}
+.ow-respondent-table td > small {
+  color: #728197;
+}
+.ow-respondent-table td > code {
+  color: #1c6f83;
+}
+.ow-respondent-status {
+  display: inline-flex !important;
+  border-radius: 999px;
+  padding: 6px 9px;
+  font-size: 11px;
+  font-weight: 850;
+}
+.ow-respondent-status.verified { color: #087455; background: #e8f8f2; }
+.ow-respondent-status.pending { color: #9a6416; background: #fff5df; }
+.ow-respondent-status.banned { color: #a52e42; background: #fdecef; }
+.ow-respondent-action {
+  display: grid;
+  gap: 7px;
+}
+.ow-respondent-action input {
+  width: 150px;
+  border: 1px solid #d8e0e8;
+  border-radius: 7px;
+  padding: 7px 8px;
+  font-size: 11px;
+}
+.ow-respondent-action button {
+  border: 0;
+  border-radius: 7px;
+  padding: 8px 11px;
+  cursor: pointer;
+  font-weight: 800;
+}
+.ow-respondent-action .ban { color: #fff; background: #be3b50; }
+.ow-respondent-action .unban { color: #0b6c53; background: #dcf6ee; }
+.ow-respondent-empty {
+  padding: 42px !important;
+  color: #718096;
+  text-align: center !important;
+}
+
+@media (max-width: 900px) {
+  .ow-respondent-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ow-respondent-filters { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .ow-respondent-card { padding: 24px 18px; border-radius: 18px; }
+  .ow-respondent-grid,
+  .ow-respondent-stats { grid-template-columns: 1fr; }
+  .ow-respondent-card > footer { display: grid; }
+}
+
 /* OpinionUniverse parity pass */
 :root {
   --ou-orange: #f36b21;

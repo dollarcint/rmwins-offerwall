@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+import logging
 import mimetypes
 import re
 import secrets
@@ -15,10 +16,11 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.decorators import user_passes_test
+from django.core import signing
 from django.core.cache import caches
 from django.core.exceptions import ValidationError
-from django.db import transaction
-from django.db.models import Count, DecimalField, Q, Sum, Value
+from django.db import IntegrityError, transaction
+from django.db.models import Count, DecimalField, Max, Q, Sum, Value
 from django.db.models.functions import Coalesce
 from django.core.paginator import Paginator
 from django.http import FileResponse, Http404, HttpResponseRedirect, JsonResponse
@@ -29,6 +31,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from django.views.decorators.clickjacking import xframe_options_exempt
+from django.views.decorators.csrf import csrf_exempt
 
 from accounts.throttling import (
     consume_login_attempt,
@@ -44,6 +47,8 @@ from .forms import (
     PlacementGeneralForm,
     PlacementPostbackForm,
     PublisherPlacementCreateForm,
+    RespondentOnboardingForm,
+    RespondentVerificationForm,
     SupplierLoginForm,
     SupplierSignupForm,
 )
@@ -55,6 +60,7 @@ from .models import (
     PublisherPlacement,
     PublisherPortalAccount,
     PublisherPayoutRequest,
+    RespondentProfile,
     RewardLedgerEntry,
     WallVisit,
 )
@@ -70,6 +76,8 @@ from .security import (
     verify_session_signature,
 )
 from .tasks import _validated_callback_url
+from .respondent_security import respondent_email_hash
+from .respondent_services import issue_respondent_verification, verify_respondent_code
 from .services import (
     _render_postback_url,
     create_api_visit,
@@ -88,6 +96,8 @@ USER_ID_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,160}$")
 APP_ID_RE = re.compile(r"^(?:RMW_APP_|ID_)([0-9a-fA-F]{32})$")
 PORTAL_SESSION_KEY = "offerwall_publisher_id"
 SUPPLIER_ACCOUNT_SESSION_KEY = "offerwall_supplier_publisher_id"
+RESPONDENT_STATE_SALT = "offerwall.respondent.onboarding.v1"
+logger = logging.getLogger(__name__)
 
 
 def _registration_slug(company_name: str) -> str:
@@ -169,6 +179,91 @@ def _apply_placement_frame_policy(response, placement):
     response["X-Robots-Tag"] = "noindex, nofollow"
     response.xframe_options_exempt = True
     return response
+
+
+def _external_referrer_origin(request):
+    referer = str(request.headers.get("Referer") or "").strip()
+    parsed = urlparse(referer)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return ""
+    request_host = str(request.get_host() or "").split(":", 1)[0].lower()
+    if parsed.hostname.lower() == request_host:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _respondent_state(placement, external_user_id, parent_origin=""):
+    return signing.dumps(
+        {
+            "placement": str(placement.public_id),
+            "sid": external_user_id,
+            "parent_origin": parent_origin,
+        },
+        salt=RESPONDENT_STATE_SALT,
+        compress=True,
+    )
+
+
+def _respondent_state_is_valid(request, value, placement, external_user_id):
+    try:
+        payload = signing.loads(
+            str(value or ""),
+            salt=RESPONDENT_STATE_SALT,
+            max_age=settings.OFFERWALL_RESPONDENT_STATE_TTL_SECONDS,
+        )
+    except signing.BadSignature:
+        return False
+    if payload.get("placement") != str(placement.public_id) or payload.get("sid") != external_user_id:
+        return False
+    parent_origin = str(payload.get("parent_origin") or "")
+    if parent_origin and parent_origin not in _placement_frame_sources(placement):
+        parsed = urlparse(parent_origin)
+        allowed_wildcard = any(
+            source.startswith(("https://*.", "http://*."))
+            and parsed.hostname
+            and parsed.hostname.endswith(
+                f".{urlparse(source.replace('*.', '')).hostname}"
+            )
+            for source in _placement_frame_sources(placement)
+        )
+        if not allowed_wildcard:
+            return False
+    request._offerwall_parent_origin = parent_origin
+    return True
+
+
+def _respondent_gate_response(
+    request,
+    placement,
+    external_user_id,
+    *,
+    mode,
+    form,
+    profile=None,
+    notice="",
+    status=200,
+):
+    parent_origin = getattr(request, "_offerwall_parent_origin", "")
+    response = render(
+        request,
+        "offerwall/respondent_gate.html",
+        {
+            "placement": placement,
+            "external_user_id": external_user_id,
+            "respondent_state": _respondent_state(
+                placement,
+                external_user_id,
+                parent_origin,
+            ),
+            "respondent_parent_origin": parent_origin,
+            "respondent": profile,
+            "mode": mode,
+            "form": form,
+            "notice": notice,
+        },
+        status=status,
+    )
+    return _no_store(_apply_placement_frame_policy(response, placement))
 
 
 def _error(request, title, message, *, status=400):
@@ -579,7 +674,8 @@ def wall_entry(request, publisher_slug):
 
 def _active_visit_or_error(request, visit_id, signature):
     visit = get_object_or_404(
-        WallVisit.objects.select_related("publisher", "placement"), public_id=visit_id
+        WallVisit.objects.select_related("publisher", "placement", "respondent"),
+        public_id=visit_id,
     )
     if not visit.publisher.is_active:
         return None, _error(request, "Offerwall unavailable", "This publisher is inactive.", status=403)
@@ -592,6 +688,16 @@ def _active_visit_or_error(request, visit_id, signature):
 
 
 def _render_wall_response(request, visit):
+    if visit.respondent_id and visit.respondent.is_banned:
+        response = _error(
+            request,
+            "Account access paused",
+            "This respondent account has been blocked by the supplier.",
+            status=403,
+        )
+        if visit.placement:
+            _apply_placement_frame_policy(response, visit.placement)
+        return response
     offers = offer_catalog(visit.publisher, visit)
     placement = visit.placement
     header_logo_url = ""
@@ -617,6 +723,9 @@ def _render_wall_response(request, visit):
             "placement": placement,
             "header_logo_url": header_logo_url,
             "currency_icon_url": currency_icon_url,
+            "frame_parent_origin": getattr(
+                request, "_offerwall_parent_origin", ""
+            ),
         },
     )
     if placement:
@@ -635,8 +744,16 @@ def wall_session(request, visit_id):
 @require_GET
 def click_offer(request, visit_id, survey_id):
     visit = get_object_or_404(
-        WallVisit.objects.select_related("publisher", "placement"), public_id=visit_id
+        WallVisit.objects.select_related("publisher", "placement", "respondent"),
+        public_id=visit_id,
     )
+    if visit.respondent_id and visit.respondent.is_banned:
+        return _error(
+            request,
+            "Account access paused",
+            "This respondent account has been blocked by the supplier.",
+            status=403,
+        )
     if visit.expires_at <= timezone.now() or not visit.publisher.is_active:
         return _error(request, "Offer unavailable", "This offerwall session has expired.", status=403)
     if not verify_click_signature(
@@ -1210,7 +1327,11 @@ def publisher_placement_event_postback_add(request, placement_id):
             request.POST.get("postback_email_opt_out")
         )
         placement.save(update_fields=["postback_email_opt_out", "updated_at"])
-        form.save()
+        event_postback = form.save(commit=False)
+        event_postback.placement = placement
+        event_postback.survey = form.cleaned_data["survey_id"]
+        event_postback.event_name = str(request.POST.get("event_name") or "").strip()[:120]
+        event_postback.save()
         messages.success(request, "Specific event postback added.")
         destination = reverse(
             "offerwall:publisher-placement-edit",
@@ -1423,6 +1544,57 @@ SUPPLIER_SECTION_COPY = {
 }
 
 
+def _publisher_respondents_response(request, publisher):
+    queryset = publisher.respondents.select_related(
+        "publisher", "first_placement", "last_placement"
+    ).annotate(
+        visit_count=Count("visits", distinct=True),
+        click_count=Count("visits__clicks", distinct=True),
+        completed_count=Count(
+            "visits__clicks",
+            filter=Q(
+                visits__clicks__status=SurveyAttempt.Status.COMPLETED,
+                visits__clicks__is_verified=True,
+            ),
+            distinct=True,
+        ),
+        last_activity_at=Max("visits__last_seen_at"),
+    )
+    search = str(request.GET.get("q") or "").strip()
+    if search:
+        if "@" in search:
+            queryset = queryset.filter(email_hash=respondent_email_hash(search))
+        else:
+            queryset = queryset.filter(external_user_id__icontains=search)
+    status_filter = str(request.GET.get("status") or "all").strip()
+    if status_filter == "verified":
+        queryset = queryset.filter(is_email_verified=True, is_banned=False)
+    elif status_filter == "unverified":
+        queryset = queryset.filter(is_email_verified=False, is_banned=False)
+    elif status_filter == "banned":
+        queryset = queryset.filter(is_banned=True)
+
+    summary = publisher.respondents.aggregate(
+        total=Count("id"),
+        verified=Count("id", filter=Q(is_email_verified=True, is_banned=False)),
+        unverified=Count("id", filter=Q(is_email_verified=False, is_banned=False)),
+        banned=Count("id", filter=Q(is_banned=True)),
+    )
+    respondents = Paginator(queryset.order_by("-last_seen_at"), 25).get_page(
+        request.GET.get("page")
+    )
+    context = _supplier_portal_context(publisher, "respondents")
+    context.update(
+        {
+            "respondents": respondents,
+            "respondent_summary": summary,
+            "respondent_search": search,
+            "respondent_status": status_filter,
+        }
+    )
+    return _no_store(render(request, "offerwall/publisher_respondents.html", context))
+
+
 @require_GET
 def publisher_section(request, section):
     if section not in SUPPLIER_SECTION_COPY:
@@ -1430,10 +1602,44 @@ def publisher_section(request, section):
     publisher, denied = _publisher_portal_or_response(request)
     if denied:
         return denied
+    if section == "respondents":
+        return _publisher_respondents_response(request, publisher)
     title, description = SUPPLIER_SECTION_COPY[section]
     context = _supplier_portal_context(publisher, section)
     context.update({"section_title": title, "section_description": description})
     return _no_store(render(request, "offerwall/publisher_placeholder.html", context))
+
+
+@require_POST
+def publisher_respondent_action(request, respondent_id):
+    publisher, denied = _publisher_portal_or_response(request)
+    if denied:
+        return denied
+    respondent = get_object_or_404(
+        RespondentProfile,
+        public_id=respondent_id,
+        publisher=publisher,
+    )
+    action = str(request.POST.get("action") or "").strip()
+    if action == "ban":
+        respondent.is_banned = True
+        respondent.banned_at = timezone.now()
+        respondent.ban_reason = str(request.POST.get("reason") or "").strip()[:255]
+        respondent.save(
+            update_fields=["is_banned", "banned_at", "ban_reason", "updated_at"]
+        )
+        messages.success(request, f"{respondent.external_user_id} was banned.")
+    elif action == "unban":
+        respondent.is_banned = False
+        respondent.banned_at = None
+        respondent.ban_reason = ""
+        respondent.save(
+            update_fields=["is_banned", "banned_at", "ban_reason", "updated_at"]
+        )
+        messages.success(request, f"{respondent.external_user_id} was unbanned.")
+    else:
+        messages.error(request, "Unknown respondent action.")
+    return _no_store(HttpResponseRedirect(reverse("offerwall:publisher-section", args=["respondents"])))
 
 
 def _placement_embed_response(request, placement):
@@ -1480,6 +1686,192 @@ def _placement_embed_response(request, placement):
             "Use a valid respondent identifier.",
         )
         return _apply_placement_frame_policy(response, placement)
+
+    request._offerwall_parent_origin = _external_referrer_origin(request)
+    profile = RespondentProfile.objects.filter(
+        publisher=placement.publisher,
+        external_user_id=external_user_id,
+    ).first()
+    if profile and profile.is_banned:
+        return _respondent_gate_response(
+            request,
+            placement,
+            external_user_id,
+            mode="banned",
+            form=None,
+            profile=profile,
+            status=403,
+        )
+
+    if request.method == "POST":
+        if not _respondent_state_is_valid(
+            request,
+            request.POST.get("respondent_state"),
+            placement,
+            external_user_id,
+        ):
+            response = _error(
+                request,
+                "Invalid onboarding request",
+                "Reload the offerwall and try again.",
+                status=403,
+            )
+            return _apply_placement_frame_policy(response, placement)
+
+        action = str(request.POST.get("action") or "").strip()
+        if action == "register" and not (profile and profile.is_email_verified):
+            form = RespondentOnboardingForm(
+                request.POST,
+                publisher=placement.publisher,
+                profile=profile,
+            )
+            if form.is_valid():
+                try:
+                    with transaction.atomic():
+                        if profile is None:
+                            profile = RespondentProfile(
+                                publisher=placement.publisher,
+                                external_user_id=external_user_id,
+                                first_placement=placement,
+                            )
+                        profile.set_identity(
+                            full_name=form.cleaned_data["full_name"],
+                            email=form.cleaned_data["email"],
+                        )
+                        profile.age = form.cleaned_data["age"]
+                        profile.gender = form.cleaned_data["gender"]
+                        profile.last_placement = placement
+                        profile.last_seen_at = timezone.now()
+                        profile.is_email_verified = False
+                        profile.email_verified_at = None
+                        profile.save()
+                except IntegrityError:
+                    form.add_error(
+                        "email",
+                        "This email is already linked to another respondent ID.",
+                    )
+                else:
+                    try:
+                        issue_respondent_verification(profile, force=True)
+                    except Exception:
+                        logger.exception(
+                            "Could not send respondent verification email for profile %s",
+                            profile.public_id,
+                        )
+                        return _respondent_gate_response(
+                            request,
+                            placement,
+                            external_user_id,
+                            mode="verify",
+                            form=RespondentVerificationForm(),
+                            profile=profile,
+                            notice="We could not send the email. Check the address and request a new code.",
+                            status=503,
+                        )
+                    return _respondent_gate_response(
+                        request,
+                        placement,
+                        external_user_id,
+                        mode="verify",
+                        form=RespondentVerificationForm(),
+                        profile=profile,
+                        notice="A 6-digit verification code was sent to your email.",
+                    )
+            if form.errors:
+                return _respondent_gate_response(
+                    request,
+                    placement,
+                    external_user_id,
+                    mode="register",
+                    form=form,
+                    profile=profile,
+                )
+
+        elif action == "verify" and profile:
+            form = RespondentVerificationForm(request.POST)
+            if form.is_valid():
+                try:
+                    profile = verify_respondent_code(profile, form.cleaned_data["code"])
+                except ValidationError as exc:
+                    form.add_error("code", exc)
+                else:
+                    profile.last_placement = placement
+                    profile.last_seen_at = timezone.now()
+                    profile.save(update_fields=["last_placement", "last_seen_at", "updated_at"])
+            if form.errors:
+                return _respondent_gate_response(
+                    request,
+                    placement,
+                    external_user_id,
+                    mode="verify",
+                    form=form,
+                    profile=profile,
+                )
+
+        elif action == "resend" and profile and not profile.is_email_verified:
+            notice = "A new verification code was sent to your email."
+            status = 200
+            try:
+                issue_respondent_verification(profile)
+            except ValidationError as exc:
+                notice = " ".join(exc.messages)
+                status = 429
+            except Exception:
+                logger.exception(
+                    "Could not resend respondent verification email for profile %s",
+                    profile.public_id,
+                )
+                notice = "We could not send the email right now. Please try again shortly."
+                status = 503
+            return _respondent_gate_response(
+                request,
+                placement,
+                external_user_id,
+                mode="verify",
+                form=RespondentVerificationForm(),
+                profile=profile,
+                notice=notice,
+                status=status,
+            )
+
+    if profile is None or (
+        not profile.is_email_verified and request.GET.get("edit") == "1"
+    ):
+        initial = {}
+        if profile:
+            initial = {
+                "full_name": profile.full_name,
+                "email": profile.email,
+                "age": profile.age,
+                "gender": profile.gender,
+                "consent": True,
+            }
+        return _respondent_gate_response(
+            request,
+            placement,
+            external_user_id,
+            mode="register",
+            form=RespondentOnboardingForm(
+                publisher=placement.publisher,
+                profile=profile,
+                initial=initial,
+            ),
+            profile=profile,
+        )
+
+    if not profile.is_email_verified:
+        return _respondent_gate_response(
+            request,
+            placement,
+            external_user_id,
+            mode="verify",
+            form=RespondentVerificationForm(),
+            profile=profile,
+        )
+
+    profile.last_placement = placement
+    profile.last_seen_at = timezone.now()
+    profile.save(update_fields=["last_placement", "last_seen_at", "updated_at"])
     visit = create_api_visit(
         placement.publisher,
         external_user_id=external_user_id,
@@ -1492,12 +1884,14 @@ def _placement_embed_response(request, placement):
         affiliate_sub_id_5=request.GET.get("sid5", ""),
         idfa=request.GET.get("idfa", ""),
         gaid=request.GET.get("gaid", ""),
+        respondent=profile,
     )
     return _render_wall_response(request, visit)
 
 
 @xframe_options_exempt
-@require_GET
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
 def placement_app_embed(request, app_id):
     placement_uuid = _app_uuid_from_id(app_id)
     if not placement_uuid:
@@ -1512,7 +1906,8 @@ def placement_app_embed(request, app_id):
 
 
 @xframe_options_exempt
-@require_GET
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
 def placement_embed(request, placement_id):
     """Legacy UUID embed route retained for existing publisher snippets."""
     placement = get_object_or_404(

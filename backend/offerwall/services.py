@@ -244,6 +244,7 @@ def create_wall_visit(
     affiliate_sub_id_5="",
     idfa="",
     gaid="",
+    respondent=None,
 ) -> WallVisit:
     location = resolve_entry_geolocation(request) if request is not None else {}
     client_data = get_request_client_data(request) if request is not None else {}
@@ -251,6 +252,7 @@ def create_wall_visit(
     defaults = {
         "external_user_id": external_user_id,
         "placement": placement,
+        "respondent": respondent,
         "external_campaign_id": str(external_campaign_id or "").strip()[:160],
         "affiliate_sub_id": str(affiliate_sub_id or "").strip()[:160],
         "affiliate_sub_id_3": str(affiliate_sub_id_3 or "").strip()[:160],
@@ -294,6 +296,7 @@ def create_api_visit(
     affiliate_sub_id_5="",
     idfa="",
     gaid="",
+    respondent=None,
 ) -> WallVisit:
     return create_wall_visit(
         publisher,
@@ -309,6 +312,7 @@ def create_api_visit(
         affiliate_sub_id_5=affiliate_sub_id_5,
         idfa=idfa,
         gaid=gaid,
+        respondent=respondent,
     )
 
 
@@ -332,6 +336,8 @@ def result_url_for_attempt(attempt: SurveyAttempt) -> str:
 
 def create_offer_click(*, visit: WallVisit, survey: Survey, request) -> tuple[OfferClick, bool]:
     publisher = visit.publisher
+    if visit.respondent_id and visit.respondent.is_banned:
+        raise ValueError("This respondent account is blocked.")
     service_user = ensure_service_user(publisher)
     override = OfferOverride.objects.filter(publisher=publisher, survey=survey).first()
     if override and override.is_excluded:

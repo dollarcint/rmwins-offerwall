@@ -1,9 +1,11 @@
 from datetime import timedelta
 from decimal import Decimal
+import re
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.test import RequestFactory, TestCase, override_settings
 from django.core.exceptions import ValidationError
 from django.urls import reverse
@@ -21,6 +23,7 @@ from .models import (
     PublisherPlacement,
     PublisherPortalAccount,
     PublisherPayoutRequest,
+    RespondentProfile,
     RewardLedgerEntry,
     WallVisit,
 )
@@ -56,6 +59,12 @@ OFFERWALL_SETTINGS = {
     "OFFERWALL_PORTAL_LINK_TTL_SECONDS": 900,
     "OFFERWALL_PORTAL_SESSION_TTL_SECONDS": 43200,
     "OFFERWALL_MINIMUM_PAYOUT": Decimal("1.00"),
+    "OFFERWALL_VERIFICATION_TTL_SECONDS": 900,
+    "OFFERWALL_VERIFICATION_RESEND_SECONDS": 60,
+    "OFFERWALL_VERIFICATION_MAX_ATTEMPTS": 5,
+    "OFFERWALL_RESPONDENT_STATE_TTL_SECONDS": 7200,
+    "EMAIL_BACKEND": "django.core.mail.backends.locmem.EmailBackend",
+    "DEFAULT_FROM_EMAIL": "test@rmwins.example",
 }
 
 
@@ -103,6 +112,24 @@ class OfferwallFlowTests(TestCase):
         visit = visit or self._visit()
         request = self.factory.get("/", HTTP_USER_AGENT="Mozilla/5.0")
         return create_offer_click(visit=visit, survey=self.survey, request=request)[0]
+
+    def _verified_respondent(self, *, sid, placement, email=None):
+        profile = RespondentProfile(
+            publisher=self.publisher,
+            external_user_id=sid,
+            age=30,
+            gender=RespondentProfile.Gender.PREFER_NOT_TO_SAY,
+            first_placement=placement,
+            last_placement=placement,
+            is_email_verified=True,
+            email_verified_at=timezone.now(),
+        )
+        profile.set_identity(
+            full_name=f"Respondent {sid}",
+            email=email or f"{sid}@respondent.example",
+        )
+        profile.save()
+        return profile
 
     def test_publisher_generates_one_way_api_key_and_encrypted_signing_secret(self):
         self.assertTrue(self.api_key.startswith("ow_live_"))
@@ -760,6 +787,11 @@ class OfferwallFlowTests(TestCase):
         self.assertContains(preview, "Placement active")
         self.assertNotIn("X-Frame-Options", preview)
 
+        self._verified_respondent(
+            sid="member-100",
+            placement=placement,
+            email="member-100@example.test",
+        )
         response = self.client.get(
             f"{path}?uid=member-100&campaign_id=summer&subid=home",
             HTTP_REFERER="https://publisher.example.test/rewards",
@@ -791,6 +823,20 @@ class OfferwallFlowTests(TestCase):
         )
         self.assertEqual(direct_session["X-Frame-Options"], "DENY")
 
+        direct = self.client.get(
+            path,
+            {
+                "SID": "member-direct",
+                "campaign_id": "winter",
+                "subid": "cta",
+            },
+        )
+        self.assertContains(direct, "Tell us about yourself")
+        self._verified_respondent(
+            sid="member-direct",
+            placement=placement,
+            email="member-direct@example.test",
+        )
         direct = self.client.get(
             path,
             {
@@ -842,6 +888,11 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(denied.status_code, 403)
         self.assertFalse(WallVisit.objects.filter(placement=placement).exists())
 
+        self._verified_respondent(
+            sid="partner-user",
+            placement=placement,
+            email="partner-user@example.test",
+        )
         allowed = self.client.get(
             path,
             {"SID": "partner-user"},
@@ -857,6 +908,98 @@ class OfferwallFlowTests(TestCase):
             "https://*.partner.example.test",
             allowed["Content-Security-Policy"],
         )
+
+    def test_iframe_onboards_verifies_lists_and_bans_respondent(self):
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Onboarding wall",
+            website_name="Onboarding Site",
+            website_url="https://publisher.example.test",
+        )
+        path = reverse(
+            "offerwall:placement-app-embed",
+            kwargs={"app_id": placement.app_id},
+        )
+        iframe_url = f"{path}?SID=omega-new"
+
+        registration = self.client.get(iframe_url)
+        self.assertEqual(registration.status_code, 200)
+        self.assertContains(registration, "Tell us about yourself")
+        self.assertFalse(WallVisit.objects.filter(placement=placement).exists())
+        state = registration.context["respondent_state"]
+
+        submitted = self.client.post(
+            iframe_url,
+            {
+                "action": "register",
+                "respondent_state": state,
+                "full_name": "Omega Respondent",
+                "email": "omega.respondent@example.test",
+                "age": "29",
+                "gender": RespondentProfile.Gender.NON_BINARY,
+                "consent": "on",
+            },
+        )
+        self.assertEqual(submitted.status_code, 200)
+        self.assertContains(submitted, "Verify your email")
+        self.assertEqual(len(mail.outbox), 1)
+        profile = RespondentProfile.objects.get(external_user_id="omega-new")
+        self.assertEqual(profile.full_name, "Omega Respondent")
+        self.assertEqual(profile.email, "omega.respondent@example.test")
+        self.assertNotIn("omega.respondent", profile.encrypted_email)
+        self.assertFalse(profile.is_email_verified)
+        self.assertFalse(WallVisit.objects.filter(respondent=profile).exists())
+
+        code_match = re.search(r"code is: (\d{6})", mail.outbox[0].body)
+        self.assertIsNotNone(code_match)
+        verified = self.client.post(
+            iframe_url,
+            {
+                "action": "verify",
+                "respondent_state": submitted.context["respondent_state"],
+                "code": code_match.group(1),
+            },
+        )
+        self.assertEqual(verified.status_code, 200)
+        self.assertContains(verified, self.survey.name)
+        profile.refresh_from_db()
+        self.assertTrue(profile.is_email_verified)
+        self.assertIsNotNone(profile.email_verified_at)
+        visit = WallVisit.objects.get(respondent=profile)
+        self.assertEqual(visit.external_user_id, "omega-new")
+
+        self._open_supplier_session(suffix="respondent-management")
+        respondents_url = reverse(
+            "offerwall:publisher-section", args=["respondents"]
+        )
+        respondents_page = self.client.get(respondents_url)
+        self.assertContains(respondents_page, "Omega Respondent")
+        self.assertContains(respondents_page, "omega.respondent@example.test")
+        self.assertContains(respondents_page, "Email verified")
+        self.assertContains(respondents_page, self.publisher.name)
+
+        action_url = reverse(
+            "offerwall:publisher-respondent-action",
+            kwargs={"respondent_id": profile.public_id},
+        )
+        banned = self.client.post(
+            action_url,
+            {"action": "ban", "reason": "Quality review"},
+        )
+        self.assertEqual(banned.status_code, 302)
+        profile.refresh_from_db()
+        self.assertTrue(profile.is_banned)
+        blocked = self.client.get(iframe_url)
+        self.assertEqual(blocked.status_code, 403)
+        self.assertContains(blocked, "Account access paused", status_code=403)
+
+        unbanned = self.client.post(action_url, {"action": "unban"})
+        self.assertEqual(unbanned.status_code, 302)
+        profile.refresh_from_db()
+        self.assertFalse(profile.is_banned)
+        restored = self.client.get(iframe_url)
+        self.assertEqual(restored.status_code, 200)
+        self.assertContains(restored, self.survey.name)
 
     def test_supplier_can_delete_own_placement(self):
         self._open_supplier_session(suffix="lifecycle")

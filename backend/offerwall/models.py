@@ -469,13 +469,127 @@ class PlacementEventPostback(models.Model):
         return f"{self.placement.name} · {target} · {self.event_type}"
 
 
+class RespondentProfile(models.Model):
+    """Persistent, supplier-scoped identity collected before iframe inventory access."""
+
+    class Gender(models.TextChoices):
+        FEMALE = "female", "Female"
+        MALE = "male", "Male"
+        NON_BINARY = "non_binary", "Non-binary"
+        OTHER = "other", "Other"
+        PREFER_NOT_TO_SAY = "prefer_not_to_say", "Prefer not to say"
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    publisher = models.ForeignKey(
+        Publisher,
+        on_delete=models.PROTECT,
+        related_name="respondents",
+    )
+    external_user_id = models.CharField(max_length=160)
+    encrypted_name = models.TextField(editable=False)
+    encrypted_email = models.TextField(editable=False)
+    email_hash = models.CharField(max_length=64, editable=False)
+    age = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(18), MaxValueValidator(100)]
+    )
+    gender = models.CharField(max_length=24, choices=Gender.choices)
+    first_placement = models.ForeignKey(
+        PublisherPlacement,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="first_seen_respondents",
+    )
+    last_placement = models.ForeignKey(
+        PublisherPlacement,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="last_seen_respondents",
+    )
+    is_email_verified = models.BooleanField(default=False, db_index=True)
+    email_verified_at = models.DateTimeField(null=True, blank=True)
+    verification_code_hash = models.CharField(max_length=64, blank=True, editable=False)
+    verification_sent_at = models.DateTimeField(null=True, blank=True, editable=False)
+    verification_expires_at = models.DateTimeField(null=True, blank=True, editable=False)
+    verification_attempts = models.PositiveSmallIntegerField(default=0, editable=False)
+    is_banned = models.BooleanField(default=False, db_index=True)
+    banned_at = models.DateTimeField(null=True, blank=True)
+    ban_reason = models.CharField(max_length=255, blank=True)
+    joined_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    last_seen_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-joined_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["publisher", "external_user_id"],
+                name="unique_publisher_respondent_sid",
+            ),
+            models.UniqueConstraint(
+                fields=["publisher", "email_hash"],
+                name="unique_publisher_respondent_email",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["publisher", "is_banned", "-last_seen_at"],
+                name="respondent_supplier_state_idx",
+            ),
+        ]
+
+    @property
+    def full_name(self):
+        from .respondent_security import decrypt_respondent_value
+
+        return decrypt_respondent_value(self.encrypted_name)
+
+    @property
+    def email(self):
+        from .respondent_security import decrypt_respondent_value
+
+        return decrypt_respondent_value(self.encrypted_email)
+
+    @property
+    def masked_email(self):
+        value = self.email
+        if "@" not in value:
+            return "Email unavailable"
+        local, domain = value.split("@", 1)
+        visible = local[:2] if len(local) > 2 else local[:1]
+        return f"{visible}{'•' * max(3, len(local) - len(visible))}@{domain}"
+
+    def set_identity(self, *, full_name, email):
+        from .respondent_security import (
+            encrypt_respondent_value,
+            normalize_respondent_email,
+            respondent_email_hash,
+        )
+
+        normalized_email = normalize_respondent_email(email)
+        self.encrypted_name = encrypt_respondent_value(str(full_name or "").strip())
+        self.encrypted_email = encrypt_respondent_value(normalized_email)
+        self.email_hash = respondent_email_hash(normalized_email)
+
+    def __str__(self):
+        return f"{self.publisher.slug} · {self.external_user_id}"
+
+
 class WallVisit(models.Model):
-    """Short-lived, signed browser session without creating a respondent account."""
+    """Short-lived browser visit linked to a verified respondent when available."""
 
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     publisher = models.ForeignKey(Publisher, on_delete=models.PROTECT, related_name="wall_visits")
     placement = models.ForeignKey(
         PublisherPlacement,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="visits",
+    )
+    respondent = models.ForeignKey(
+        RespondentProfile,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,

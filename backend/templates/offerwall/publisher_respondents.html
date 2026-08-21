@@ -1,0 +1,49 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}Respondents · {{ portal_publisher.name }}{% endblock %}
+{% block content %}
+<section class="ow-portal-page ow-respondents-page">
+  <header class="ow-page-heading"><div><span class="ow-eyebrow"><i></i> Supplier workspace</span><h1>Respondents</h1><p>Review registered users, email verification, placement activity and access status.</p></div></header>
+
+  <div class="ow-respondent-stats">
+    <article><span>Total respondents</span><strong>{{ respondent_summary.total|default:0 }}</strong></article>
+    <article><span>Verified accounts</span><strong>{{ respondent_summary.verified|default:0 }}</strong></article>
+    <article><span>Awaiting verification</span><strong>{{ respondent_summary.unverified|default:0 }}</strong></article>
+    <article><span>Banned accounts</span><strong>{{ respondent_summary.banned|default:0 }}</strong></article>
+  </div>
+
+  <form method="get" class="ow-respondent-filters">
+    <label><span class="sr-only">Search respondents</span><input type="search" name="q" value="{{ respondent_search }}" placeholder="Search exact email or respondent ID"></label>
+    <select name="status" aria-label="Respondent status">
+      <option value="all" {% if respondent_status == 'all' %}selected{% endif %}>All statuses</option>
+      <option value="verified" {% if respondent_status == 'verified' %}selected{% endif %}>Verified</option>
+      <option value="unverified" {% if respondent_status == 'unverified' %}selected{% endif %}>Unverified</option>
+      <option value="banned" {% if respondent_status == 'banned' %}selected{% endif %}>Banned</option>
+    </select>
+    <button type="submit">Filter</button>
+  </form>
+
+  <div class="ow-respondent-table-wrap">
+    <table class="ow-respondent-table">
+      <thead><tr><th>Respondent</th><th>Profile</th><th>Supplier / placement</th><th>Joined / activity</th><th>Performance</th><th>Status</th><th>Action</th></tr></thead>
+      <tbody>
+      {% for respondent in respondents %}
+        <tr>
+          <td><strong>{{ respondent.full_name|default:'Name unavailable' }}</strong><small>{{ respondent.email|default:'Email unavailable' }}</small><code>{{ respondent.external_user_id }}</code></td>
+          <td><span>{{ respondent.age }} years</span><small>{{ respondent.get_gender_display }}</small></td>
+          <td><strong>{{ respondent.publisher.name }}</strong><small>{{ respondent.last_placement.name|default:'No placement' }}</small></td>
+          <td><span>{{ respondent.joined_at|date:'d M Y, H:i' }}</span><small>Last seen {{ respondent.last_activity_at|default:respondent.last_seen_at|timesince }} ago</small></td>
+          <td><span>{{ respondent.visit_count }} visits · {{ respondent.click_count }} clicks</span><small>{{ respondent.completed_count }} verified completes</small></td>
+          <td>{% if respondent.is_banned %}<span class="ow-respondent-status banned">Banned</span>{% elif respondent.is_email_verified %}<span class="ow-respondent-status verified">Email verified</span>{% else %}<span class="ow-respondent-status pending">Pending verification</span>{% endif %}</td>
+          <td>
+            <form method="post" action="{% url 'offerwall:publisher-respondent-action' respondent.public_id %}" class="ow-respondent-action" onsubmit="return confirm('{% if respondent.is_banned %}Unban this respondent?{% else %}Ban this respondent from all surveys?{% endif %}');">{% csrf_token %}
+              {% if respondent.is_banned %}<input type="hidden" name="action" value="unban"><button type="submit" class="unban">Unban</button>{% else %}<input type="hidden" name="action" value="ban"><input type="text" name="reason" maxlength="255" placeholder="Optional reason"><button type="submit" class="ban">Ban</button>{% endif %}
+            </form>
+          </td>
+        </tr>
+      {% empty %}<tr><td colspan="7" class="ow-respondent-empty">No respondents match these filters.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if respondents.paginator.num_pages > 1 %}<nav class="ow-pagination" aria-label="Respondent pages">{% if respondents.has_previous %}<a href="?page={{ respondents.previous_page_number }}&amp;q={{ respondent_search|urlencode }}&amp;status={{ respondent_status }}">Previous</a>{% endif %}<span>Page {{ respondents.number }} of {{ respondents.paginator.num_pages }}</span>{% if respondents.has_next %}<a href="?page={{ respondents.next_page_number }}&amp;q={{ respondent_search|urlencode }}&amp;status={{ respondent_status }}">Next</a>{% endif %}</nav>{% endif %}
+</section>
+{% endblock %}

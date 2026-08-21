@@ -17,6 +17,7 @@ from .models import (
     PublisherPlacement,
     PublisherPortalAccount,
     PublisherPayoutRequest,
+    RespondentProfile,
     RewardLedgerEntry,
     WallVisit,
 )
@@ -278,10 +279,69 @@ class OfferOverrideAdmin(admin.ModelAdmin):
 
 @admin.register(WallVisit)
 class WallVisitAdmin(admin.ModelAdmin):
-    list_display = ["public_id", "publisher", "placement", "external_user_id", "country_code", "device", "expires_at", "created_at"]
+    list_display = ["public_id", "publisher", "placement", "respondent", "external_user_id", "country_code", "device", "expires_at", "created_at"]
     list_filter = ["publisher", "placement", "country_code", "device", "created_at"]
     search_fields = ["external_user_id", "external_campaign_id", "affiliate_sub_id", "public_id", "entry_nonce"]
     readonly_fields = [field.name for field in WallVisit._meta.fields]
+
+
+@admin.register(RespondentProfile)
+class RespondentProfileAdmin(admin.ModelAdmin):
+    list_display = [
+        "external_user_id",
+        "full_name_display",
+        "email_display",
+        "publisher",
+        "last_placement",
+        "age",
+        "gender",
+        "is_email_verified",
+        "is_banned",
+        "joined_at",
+        "last_seen_at",
+    ]
+    list_filter = [
+        "publisher",
+        "is_email_verified",
+        "is_banned",
+        "gender",
+        "first_placement",
+        "last_placement",
+        "joined_at",
+    ]
+    search_fields = ["external_user_id", "public_id", "email_hash"]
+    readonly_fields = [
+        "public_id",
+        "full_name_display",
+        "email_display",
+        "email_hash",
+        "verification_code_hash",
+        "verification_sent_at",
+        "verification_expires_at",
+        "verification_attempts",
+        "email_verified_at",
+        "joined_at",
+        "last_seen_at",
+        "updated_at",
+    ]
+    fieldsets = [
+        ("Identity", {"fields": ["publisher", "public_id", "external_user_id", "full_name_display", "email_display", "email_hash", "age", "gender"]}),
+        ("Placement", {"fields": ["first_placement", "last_placement"]}),
+        ("Verification", {"fields": ["is_email_verified", "email_verified_at", "verification_sent_at", "verification_expires_at", "verification_attempts", "verification_code_hash"]}),
+        ("Access", {"fields": ["is_banned", "banned_at", "ban_reason"]}),
+        ("Activity", {"fields": ["joined_at", "last_seen_at", "updated_at"]}),
+    ]
+
+    @admin.display(description="Name")
+    def full_name_display(self, obj):
+        return obj.full_name
+
+    @admin.display(description="Email")
+    def email_display(self, obj):
+        return obj.email
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(PublisherPlacement)

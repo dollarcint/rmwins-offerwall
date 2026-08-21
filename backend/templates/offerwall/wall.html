@@ -71,9 +71,10 @@
 </script>{% endif %}
 {% if placement %}<script>
 (() => {
-  if (window.parent === window || !document.referrer) return;
+  if (window.parent === window) return;
   let parentOrigin;
-  try { parentOrigin = new URL(document.referrer).origin; } catch (error) { return; }
+  const configuredOrigin = '{{ frame_parent_origin|escapejs }}';
+  try { parentOrigin = configuredOrigin || new URL(document.referrer).origin; } catch (error) { return; }
   if (!/^https?:\/\//.test(parentOrigin)) return;
   let scheduled = false;
   const sendHeight = () => {
