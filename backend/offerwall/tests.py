@@ -16,6 +16,7 @@ from vendors.models import Client
 from .models import (
     OfferClick,
     OfferOverride,
+    PlacementEventPostback,
     PostbackDelivery,
     Publisher,
     PublisherPlacement,
@@ -554,6 +555,122 @@ class OfferwallFlowTests(TestCase):
         self.assertContains(settings_page, "Recommended iframe")
         self.assertContains(settings_page, "Copy Code")
 
+    def test_supplier_can_configure_all_placement_settings(self):
+        self._open_supplier_session(suffix="settings")
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Settings wall",
+            website_name="Settings Site",
+            website_url="https://settings.example.test",
+        )
+        edit_url = reverse(
+            "offerwall:publisher-placement-edit",
+            kwargs={"placement_id": placement.public_id},
+        )
+        response = self.client.post(
+            edit_url,
+            {
+                "form_type": "general",
+                "traffic_type": PublisherPlacement.TrafficType.BOTH,
+                "allowed_domains": "rewards.example.test\napp.example.test",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        response = self.client.post(
+            edit_url,
+            {
+                "form_type": "currency",
+                "currency_name": "Coins",
+                "user_revenue_share": "80",
+                "currency_multiplier": "25",
+                "reward_rounding_precision": "2",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        response = self.client.post(
+            edit_url,
+            {
+                "form_type": "postback",
+                "postback_enabled": "on",
+                "postback_url": "https://publisher.example.test/global?uid={SID}&status={STATUS}",
+                "whitelist_postback_ip": "on",
+                "respondent_id_parameter": "SID",
+                "campaign_id_parameter": "campaign_id",
+                "affiliate_sub_parameter": "sid2",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        response = self.client.post(
+            edit_url,
+            {
+                "form_type": "design",
+                "active_content_types": ["offers", "survey"],
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        placement.refresh_from_db()
+        self.assertEqual(placement.traffic_type, PublisherPlacement.TrafficType.BOTH)
+        self.assertEqual(placement.currency_name, "Coins")
+        self.assertEqual(placement.display_reward(Decimal("2.00")), Decimal("40.00"))
+        self.assertTrue(placement.postback_enabled)
+        self.assertEqual(placement.active_content_types, ["offers", "survey"])
+
+        add_rule_url = reverse(
+            "offerwall:publisher-placement-event-postback-add",
+            kwargs={"placement_id": placement.public_id},
+        )
+        response = self.client.post(
+            add_rule_url,
+            {
+                "survey_id": self.survey.local_id,
+                "event_type": "complete",
+                "event_name": "Survey complete",
+                "callback_url": "https://publisher.example.test/complete/{OFFERID}?uid={SID}",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        rule = PlacementEventPostback.objects.get(placement=placement)
+        self.assertEqual(rule.survey, self.survey)
+
+        visit = create_wall_visit(
+            self.publisher,
+            external_user_id="settings-user",
+            nonce="settings_event_nonce",
+            entry_timestamp=timezone.now(),
+            placement=placement,
+        )
+        click = self._click(visit=visit)
+        click.attempt.status = SurveyAttempt.Status.COMPLETED
+        click.attempt.status_source = "innovatemr_s2s"
+        click.attempt.is_verified = True
+        click.attempt.save(
+            update_fields=["status", "status_source", "is_verified", "updated_at"]
+        )
+        process_attempt_outcome(click.attempt_id)
+        delivery = PostbackDelivery.objects.get(click=click, event_type="complete")
+        self.assertIn(f"/complete/{self.survey.local_id}", delivery.callback_url)
+        self.assertIn("uid=settings-user", delivery.callback_url)
+
+    def test_inventory_api_accepts_bearer_key_and_placement_app_id(self):
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="API wall",
+            website_name="API Site",
+            website_url="https://api-site.example.test",
+            currency_name="Coins",
+            currency_multiplier=Decimal("20.000000"),
+        )
+        response = self.client.get(
+            reverse("offerwall:offers-api"),
+            {"uid": "api-user", "app_id": placement.app_id},
+            HTTP_AUTHORIZATION=f"Bearer {self.api_key}",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["app_id"], placement.app_id)
+        self.assertEqual(payload["publisher"]["currency"], "Coins")
+        self.assertEqual(payload["offers"][0]["reward"], "70.00")
+
     def test_placement_embed_creates_placement_attributed_visit(self):
         placement = PublisherPlacement.objects.create(
             publisher=self.publisher,
@@ -715,7 +832,7 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(delivery.payload["campaign_id"], "campaign-88")
         self.assertEqual(delivery.payload["affiliate_sub"], "homepage")
         self.assertEqual(delivery.payload["payout_amount"], "3.50")
-        self.assertEqual(delivery.payload["reward_amount"], "350.000000")
+        self.assertEqual(delivery.payload["reward_amount"], "350.00")
         self.assertEqual(delivery.payload["reward_currency"], "PTS")
 
     def test_supplier_placement_list_is_publisher_scoped(self):

@@ -6,7 +6,9 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 
-from .models import Publisher, PublisherPlacement
+from surveys.models import Survey
+
+from .models import PlacementEventPostback, Publisher, PublisherPlacement
 from .security import generate_signing_secret
 
 
@@ -187,9 +189,232 @@ class PublisherPlacementCreateForm(forms.ModelForm):
             suffix += 1
         placement.name = candidate
         placement.currency = self.publisher.currency
+        placement.currency_name = self.publisher.currency
+        placement.respondent_id_parameter = "SID"
+        placement.affiliate_sub_parameter = "sid2"
         if commit:
             placement.save()
         return placement
+
+
+def _clean_https_url_template(value, *, required=False):
+    value = str(value or "").strip()
+    if not value and not required:
+        return ""
+    if len(value) > 2000:
+        raise ValidationError("The callback URL is too long.")
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme.lower() != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
+        raise ValidationError("Use a clean HTTPS URL. Supported macros may be used in its path or query.")
+    return value
+
+
+def _validate_brand_image(upload, *, max_bytes):
+    if not upload:
+        return upload
+    if upload.size > max_bytes:
+        raise ValidationError(f"Image must be smaller than {max_bytes // 1024} KB.")
+    header = upload.read(16)
+    upload.seek(0)
+    is_png = header.startswith(b"\x89PNG\r\n\x1a\n")
+    is_jpeg = header.startswith(b"\xff\xd8\xff")
+    is_webp = header.startswith(b"RIFF") and header[8:12] == b"WEBP"
+    if not (is_png or is_jpeg or is_webp):
+        raise ValidationError("Upload a PNG, JPEG or WebP image.")
+    return upload
+
+
+class PlacementGeneralForm(forms.ModelForm):
+    class Meta:
+        model = PublisherPlacement
+        fields = ["traffic_type", "allowed_domains"]
+        widgets = {
+            "traffic_type": forms.RadioSelect,
+            "allowed_domains": forms.Textarea(
+                attrs={"rows": 3, "placeholder": "rewards.example.com\napp.example.com"}
+            ),
+        }
+
+    def clean_allowed_domains(self):
+        raw_value = str(self.cleaned_data.get("allowed_domains") or "")
+        domains = []
+        for raw_domain in re.split(r"[,\s]+", raw_value):
+            value = raw_domain.strip().lower().removeprefix("*.")
+            if not value:
+                continue
+            parsed = urlsplit(value if "://" in value else f"//{value}")
+            try:
+                hostname = parsed.hostname
+                port = parsed.port
+            except ValueError as exc:
+                raise ValidationError("Enter domains only, such as rewards.example.com.") from exc
+            if (
+                parsed.scheme not in {"", "http", "https"}
+                or not hostname
+                or parsed.username
+                or parsed.password
+                or port
+                or (parsed.path and parsed.path != "/")
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValidationError("Enter domains only, such as rewards.example.com.")
+            domain = hostname.lower().rstrip(".")
+            if domain not in domains:
+                domains.append(domain)
+        return "\n".join(domains)
+
+
+class PlacementCurrencyForm(forms.ModelForm):
+    class Meta:
+        model = PublisherPlacement
+        fields = [
+            "currency_name",
+            "user_revenue_share",
+            "currency_multiplier",
+            "reward_rounding_precision",
+        ]
+        widgets = {
+            "currency_name": forms.TextInput(attrs={"maxlength": 16, "placeholder": "Points"}),
+            "user_revenue_share": forms.NumberInput(attrs={"min": 0, "max": 100, "step": "0.01"}),
+            "currency_multiplier": forms.NumberInput(attrs={"min": "0.000001", "step": "0.000001"}),
+        }
+
+    def clean_currency_name(self):
+        value = str(self.cleaned_data.get("currency_name") or "").strip()
+        if not value:
+            raise ValidationError("Enter a currency name.")
+        return value
+
+
+class PlacementPostbackForm(forms.ModelForm):
+    postback_url = forms.CharField(
+        required=False,
+        widget=forms.TextInput(
+            attrs={
+                "placeholder": "https://example.com/postback?user_id={SID}&status={STATUS}",
+                "autocomplete": "url",
+            }
+        ),
+    )
+
+    class Meta:
+        model = PublisherPlacement
+        fields = [
+            "postback_enabled",
+            "postback_url",
+            "whitelist_postback_ip",
+            "postback_email_opt_out",
+            "respondent_id_parameter",
+            "campaign_id_parameter",
+            "affiliate_sub_parameter",
+        ]
+
+    def clean_postback_url(self):
+        return _clean_https_url_template(
+            self.cleaned_data.get("postback_url"),
+            required=bool(self.cleaned_data.get("postback_enabled")),
+        )
+
+    def clean(self):
+        cleaned = super().clean()
+        parameter_fields = (
+            "respondent_id_parameter",
+            "campaign_id_parameter",
+            "affiliate_sub_parameter",
+        )
+        values = [str(cleaned.get(field) or "").casefold() for field in parameter_fields]
+        if all(values) and len(set(values)) != len(values):
+            raise ValidationError("Each variable mapping must use a different parameter name.")
+        return cleaned
+
+
+class PlacementDesignForm(forms.ModelForm):
+    CONTENT_CHOICES = (
+        ("offers", "Offers"),
+        ("survey", "Survey"),
+        ("live_survey", "Live Survey"),
+    )
+    active_content_types = forms.MultipleChoiceField(
+        choices=CONTENT_CHOICES,
+        widget=forms.CheckboxSelectMultiple,
+    )
+
+    class Meta:
+        model = PublisherPlacement
+        fields = ["active_content_types", "currency_icon", "header_logo"]
+        widgets = {
+            "currency_icon": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/webp"}),
+            "header_logo": forms.ClearableFileInput(attrs={"accept": "image/png,image/jpeg,image/webp"}),
+        }
+
+    def clean_currency_icon(self):
+        return _validate_brand_image(self.cleaned_data.get("currency_icon"), max_bytes=500 * 1024)
+
+    def clean_header_logo(self):
+        return _validate_brand_image(self.cleaned_data.get("header_logo"), max_bytes=2 * 1024 * 1024)
+
+
+class PlacementEventPostbackForm(forms.ModelForm):
+    survey_id = forms.CharField(
+        required=False,
+        label="Survey ID",
+        widget=forms.TextInput(attrs={"placeholder": "Optional internal survey ID"}),
+    )
+    callback_url = forms.CharField(
+        widget=forms.TextInput(
+            attrs={"placeholder": "https://example.com/postback?user_id={SID}"}
+        )
+    )
+
+    class Meta:
+        model = PlacementEventPostback
+        fields = ["event_type", "event_name", "callback_url"]
+
+    def __init__(self, *args, placement=None, **kwargs):
+        self.placement = placement
+        super().__init__(*args, **kwargs)
+
+    def clean_survey_id(self):
+        value = str(self.cleaned_data.get("survey_id") or "").strip()
+        if not value:
+            return None
+        survey = Survey.objects.filter(local_id=value).first()
+        if not survey:
+            raise ValidationError("No survey exists with this internal survey ID.")
+        return survey
+
+    def clean_callback_url(self):
+        return _clean_https_url_template(self.cleaned_data.get("callback_url"), required=True)
+
+    def clean(self):
+        cleaned = super().clean()
+        survey = cleaned.get("survey_id")
+        event_type = cleaned.get("event_type")
+        if self.placement and event_type:
+            duplicate = PlacementEventPostback.objects.filter(
+                placement=self.placement,
+                survey=survey,
+                event_type=event_type,
+            )
+            if self.instance.pk:
+                duplicate = duplicate.exclude(pk=self.instance.pk)
+            if duplicate.exists():
+                raise ValidationError("A postback already exists for this survey and event.")
+        return cleaned
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.placement = self.placement
+        instance.survey = self.cleaned_data.get("survey_id")
+        if commit:
+            instance.save()
+        return instance
 
 
 class PublisherPlacementForm(forms.ModelForm):

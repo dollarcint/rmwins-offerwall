@@ -4,7 +4,7 @@
 <section class="ow-wall-shell">
   <header class="ow-wall-heading">
     <div>
-      <span class="ow-eyebrow"><i></i> {{ publisher.name }}</span>
+      {% if header_logo_url %}<img class="ow-wall-logo" src="{{ header_logo_url }}" alt="{{ placement.website_name|default:publisher.name }}">{% else %}<span class="ow-eyebrow"><i></i> {{ publisher.name }}</span>{% endif %}
       <h1>Available surveys</h1>
       <p>Choose the opportunity that fits you best. Rewards are confirmed after provider verification.</p>
     </div>
@@ -28,7 +28,7 @@
       <h2>{{ offer.title }}</h2>
       <p class="ow-offer-client">{{ offer.client }}</p>
       <div class="ow-offer-meta">
-        <span><small>Reward</small><strong>{{ offer.currency }} {{ offer.reward|floatformat:2 }}</strong></span>
+        <span><small>Reward</small><strong>{% if currency_icon_url %}<img class="ow-currency-icon" src="{{ currency_icon_url }}" alt="">{% endif %}{{ offer.reward|floatformat:2 }} {{ offer.currency }}</strong></span>
         <span><small>Time</small><strong>{% if offer.loi %}{{ offer.loi }} min{% else %}Flexible{% endif %}</strong></span>
         <span><small>Match</small><strong>{% if offer.incidence_rate %}{{ offer.incidence_rate|floatformat:0 }}%{% else %}Open{% endif %}</strong></span>
       </div>

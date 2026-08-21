@@ -1,5 +1,7 @@
 """Signed, retryable publisher postback delivery."""
 
+import hashlib
+import hmac
 import ipaddress
 import json
 import socket
@@ -65,7 +67,7 @@ def deliver_postback_task(self, delivery_id):
         placement_enabled = bool(
             delivery.placement_id
             and delivery.placement.postback_enabled
-            and delivery.placement.postback_url
+            and delivery.callback_url
         )
         publisher_enabled = bool(
             not delivery.placement_id
@@ -87,15 +89,22 @@ def deliver_postback_task(self, delivery_id):
         placement = delivery.placement
 
     try:
+        signing_secret = (
+            decrypt_placement_postback_secret(placement)
+            if placement
+            else decrypt_signing_secret(publisher)
+        )
+        transaction_signature = hmac.new(
+            signing_secret.encode("utf-8"),
+            str(payload.get("transaction_id") or "").encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        callback_url = callback_url.replace("{SIG}", transaction_signature)
         callback_url = _validated_callback_url(callback_url)
         body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         timestamp = int(timezone.now().timestamp())
         signature = postback_signature(
-            (
-                decrypt_placement_postback_secret(placement)
-                if placement
-                else decrypt_signing_secret(publisher)
-            ),
+            signing_secret,
             timestamp=timestamp,
             event_id=str(delivery.public_id),
             body=body,

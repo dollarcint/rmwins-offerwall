@@ -6,6 +6,7 @@ import logging
 import secrets
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -22,6 +23,7 @@ from surveys.survey_flow import create_attempt, get_request_client_data, get_req
 from .models import (
     OfferClick,
     OfferOverride,
+    PlacementEventPostback,
     PostbackDelivery,
     Publisher,
     PublisherPortalAccount,
@@ -177,6 +179,11 @@ def eligible_surveys(publisher: Publisher, visit: WallVisit):
 
 
 def offer_catalog(publisher: Publisher, visit: WallVisit) -> list[dict]:
+    if visit.placement_id and not (
+        set(visit.placement.active_content_types or [])
+        & {"offers", "survey", "live_survey"}
+    ):
+        return []
     overrides = {
         item.survey_id: item
         for item in OfferOverride.objects.filter(publisher=publisher).select_related("survey")
@@ -188,10 +195,8 @@ def offer_catalog(publisher: Publisher, visit: WallVisit) -> list[dict]:
         display_reward = payout
         display_currency = publisher.currency
         if visit.placement_id and payout is not None:
-            display_reward = (
-                payout * visit.placement.currency_multiplier
-            ).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
-            display_currency = visit.placement.currency
+            display_reward = visit.placement.display_reward(payout)
+            display_currency = visit.placement.currency_name
         click_path = reverse(
             "offerwall:click",
             kwargs={"visit_id": visit.public_id, "survey_id": survey.local_id},
@@ -362,10 +367,8 @@ def _postback_payload(click, attempt, event_type, ledger_entry, *, credited):
     reward_amount = amount
     reward_currency = click.currency
     if placement:
-        reward_amount = (
-            amount * placement.currency_multiplier
-        ).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
-        reward_currency = placement.currency
+        reward_amount = placement.display_reward(amount)
+        reward_currency = placement.currency_name
     return {
         "event": event_type,
         "event_id": "",
@@ -387,11 +390,37 @@ def _postback_payload(click, attempt, event_type, ledger_entry, *, credited):
         "reward_currency": reward_currency,
         "placement_id": str(placement.public_id) if placement else "",
         "placement_name": placement.name if placement else "",
+        "app_id": placement.app_id if placement else "",
+        "traffic_type": placement.traffic_type if placement else "",
         "campaign_id": click.visit.external_campaign_id,
         "affiliate_sub": click.visit.affiliate_sub_id,
         "verified": bool(attempt.is_verified),
         "occurred_at": timezone.now().isoformat(),
     }
+
+
+def _render_postback_url(template, payload):
+    values = {
+        "{app_id}": payload.get("app_id", ""),
+        "{SID}": payload.get("user_id", ""),
+        "{OFFERID}": payload.get("offer_id", ""),
+        "{STATUS}": payload.get("status", ""),
+        "{PAYOUT}": payload.get("reward_amount", ""),
+        "{PUBPAYOUT}": payload.get("payout_amount", ""),
+        "{SID2}": payload.get("affiliate_sub", ""),
+        "{SID3}": "",
+        "{SID4}": "",
+        "{SID5}": "",
+        "{eventid}": payload.get("event_id", ""),
+        "{eventname}": payload.get("event", ""),
+        "{offername}": payload.get("offer_name", ""),
+        "{IP}": "",
+        "{TransactionID}": payload.get("transaction_id", ""),
+    }
+    rendered = str(template or "")
+    for macro, value in values.items():
+        rendered = rendered.replace(macro, quote(str(value or ""), safe=""))
+    return rendered
 
 
 def _enqueue_postback(delivery_id):
@@ -406,11 +435,28 @@ def _enqueue_postback(delivery_id):
 def _create_postback(click, attempt, event_type, ledger_entry=None, *, credited=False):
     publisher = click.publisher
     placement = click.visit.placement if click.visit_id else None
+    specific_rule = None
+    if placement:
+        specific_rule = (
+            PlacementEventPostback.objects.filter(
+                placement=placement,
+                event_type=event_type,
+                is_active=True,
+            )
+            .filter(Q(survey=click.survey) | Q(survey__isnull=True))
+            .order_by("-survey_id", "-created_at")
+            .first()
+        )
+    placement_template = (
+        specific_rule.callback_url
+        if specific_rule
+        else placement.postback_url if placement else ""
+    )
     placement_callback = bool(
-        placement and placement.postback_enabled and placement.postback_url
+        placement and placement.postback_enabled and placement_template
     )
     callback_url = (
-        placement.postback_url
+        placement_template
         if placement_callback
         else publisher.callback_url
     )
@@ -434,11 +480,14 @@ def _create_postback(click, attempt, event_type, ledger_entry=None, *, credited=
     )
     if not created:
         return delivery
-    delivery.payload = _postback_payload(
+    payload = _postback_payload(
         click, attempt, event_type, ledger_entry, credited=credited
     )
-    delivery.payload["event_id"] = str(delivery.public_id)
-    delivery.save(update_fields=["payload", "updated_at"])
+    payload["event_id"] = str(delivery.public_id)
+    payload["offer_name"] = click.survey.name or f"Survey {click.survey.local_id}"
+    delivery.payload = payload
+    delivery.callback_url = _render_postback_url(callback_url, payload)
+    delivery.save(update_fields=["payload", "callback_url", "updated_at"])
     if status == PostbackDelivery.Status.PENDING:
         transaction.on_commit(lambda: _enqueue_postback(delivery.pk), robust=True)
     return delivery

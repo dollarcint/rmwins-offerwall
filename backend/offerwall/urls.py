@@ -40,6 +40,21 @@ urlpatterns = [
         name="publisher-placement-action",
     ),
     path(
+        "publisher/placements/<uuid:placement_id>/postbacks/",
+        views.publisher_placement_event_postback_add,
+        name="publisher-placement-event-postback-add",
+    ),
+    path(
+        "publisher/placements/<uuid:placement_id>/postbacks/<uuid:postback_id>/action/",
+        views.publisher_placement_event_postback_action,
+        name="publisher-placement-event-postback-action",
+    ),
+    path(
+        "publisher/placements/<uuid:placement_id>/postback-test/",
+        views.publisher_placement_postback_test,
+        name="publisher-placement-postback-test",
+    ),
+    path(
         "publisher/sections/<slug:section>/",
         views.publisher_section,
         name="publisher-section",
@@ -54,6 +69,11 @@ urlpatterns = [
         "embed/<uuid:placement_id>/",
         views.placement_embed,
         name="placement-embed",
+    ),
+    path(
+        "brand/<uuid:placement_id>/<slug:kind>/",
+        views.placement_brand_asset,
+        name="placement-brand-asset",
     ),
     path("operations/", views.offerwall_operations, name="operations"),
     path(

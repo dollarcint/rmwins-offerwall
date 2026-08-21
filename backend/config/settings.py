@@ -102,6 +102,9 @@ OFFERWALL_POSTBACK_TIMEOUT_SECONDS = max(
 OFFERWALL_POSTBACK_MAX_ATTEMPTS = max(
     1, int(os.getenv("OFFERWALL_POSTBACK_MAX_ATTEMPTS", "6"))
 )
+OFFERWALL_POSTBACK_SOURCE_IP = os.getenv(
+    "OFFERWALL_POSTBACK_SOURCE_IP", "82.29.166.173"
+).strip()
 OFFERWALL_PORTAL_LINK_TTL_SECONDS = max(
     60, int(os.getenv("OFFERWALL_PORTAL_LINK_TTL_SECONDS", "900"))
 )
@@ -318,6 +321,8 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+MEDIA_URL = "/media/"
+MEDIA_ROOT = Path(os.getenv("DJANGO_MEDIA_ROOT", BASE_DIR / "media"))
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},

@@ -11,6 +11,7 @@ from .forms import PublisherAdminForm
 from .models import (
     OfferClick,
     OfferOverride,
+    PlacementEventPostback,
     PostbackDelivery,
     Publisher,
     PublisherPlacement,
@@ -289,10 +290,10 @@ class PublisherPlacementAdmin(admin.ModelAdmin):
         "platform",
         "status",
         "postback_enabled",
-        "currency",
+        "currency_name",
         "updated_at",
     ]
-    list_filter = ["publisher", "platform", "status", "postback_enabled", "currency"]
+    list_filter = ["publisher", "platform", "status", "traffic_type", "postback_enabled", "currency"]
     search_fields = ["name", "website_name", "website_url", "public_id"]
     readonly_fields = [
         "public_id",
@@ -303,15 +304,36 @@ class PublisherPlacementAdmin(admin.ModelAdmin):
     ]
     fieldsets = [
         ("Placement", {"fields": ["publisher", "public_id", "name", "platform", "status"]}),
-        ("Website", {"fields": ["website_name", "website_url", "allowed_domains"]}),
-        ("Reward", {"fields": ["currency", "currency_multiplier"]}),
+        ("Website", {"fields": ["website_name", "website_url", "allowed_domains", "traffic_type"]}),
+        (
+            "Reward",
+            {
+                "fields": [
+                    "currency",
+                    "currency_name",
+                    "user_revenue_share",
+                    "currency_multiplier",
+                    "reward_rounding_precision",
+                ]
+            },
+        ),
+        ("Design", {"fields": ["active_content_types", "currency_icon", "header_logo"]}),
         (
             "Variable mapping",
             {"fields": ["respondent_id_parameter", "campaign_id_parameter", "affiliate_sub_parameter"]},
         ),
         (
             "Postback",
-            {"fields": ["postback_enabled", "postback_url", "masked_postback_secret_display", "postback_secret_changed_at"]},
+            {
+                "fields": [
+                    "postback_enabled",
+                    "postback_url",
+                    "whitelist_postback_ip",
+                    "postback_email_opt_out",
+                    "masked_postback_secret_display",
+                    "postback_secret_changed_at",
+                ]
+            },
         ),
         ("Audit", {"fields": ["created_at", "updated_at"], "classes": ["collapse"]}),
     ]
@@ -319,6 +341,15 @@ class PublisherPlacementAdmin(admin.ModelAdmin):
     @admin.display(description="Postback signing key")
     def masked_postback_secret_display(self, obj):
         return obj.masked_postback_secret if obj and obj.pk else "Generated on first save"
+
+
+@admin.register(PlacementEventPostback)
+class PlacementEventPostbackAdmin(admin.ModelAdmin):
+    list_display = ["placement", "survey", "event_type", "event_name", "is_active", "updated_at"]
+    list_filter = ["placement__publisher", "placement", "event_type", "is_active"]
+    search_fields = ["placement__name", "survey__local_id", "event_name", "callback_url"]
+    autocomplete_fields = ["placement", "survey"]
+    readonly_fields = ["public_id", "created_at", "updated_at"]
 
 
 @admin.register(OfferClick)

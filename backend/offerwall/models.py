@@ -18,6 +18,24 @@ from .security import (
 PERCENTAGE_VALIDATORS = [MinValueValidator(Decimal("0.00")), MaxValueValidator(Decimal("100.00"))]
 
 
+def default_placement_content_types():
+    return ["survey", "live_survey"]
+
+
+def _placement_asset_name(instance, filename, kind):
+    extension = str(filename or "").lower().rsplit(".", 1)[-1]
+    extension = extension if extension in {"png", "jpg", "jpeg", "webp"} else "bin"
+    return f"offerwall/placements/{instance.public_id.hex}/{kind}.{extension}"
+
+
+def placement_currency_icon_path(instance, filename):
+    return _placement_asset_name(instance, filename, "currency-icon")
+
+
+def placement_header_logo_path(instance, filename):
+    return _placement_asset_name(instance, filename, "header-logo")
+
+
 class Publisher(models.Model):
     """One external publisher/application embedding the RM Wins offerwall."""
 
@@ -201,6 +219,17 @@ class PublisherPlacement(models.Model):
         PAUSED = "paused", "Paused"
         ARCHIVED = "archived", "Archived"
 
+    class TrafficType(models.TextChoices):
+        INCENT = "incent", "Rewarded"
+        NON_INCENT = "non_incent", "Non-rewarded"
+        BOTH = "both", "All sources"
+
+    class RewardPrecision(models.IntegerChoices):
+        ONE = 1, "1 decimal place"
+        TWO = 2, "2 decimal places"
+        THREE = 3, "3 decimal places"
+        FOUR = 4, "4 decimal places"
+
     PARAMETER_VALIDATOR = RegexValidator(
         r"^[A-Za-z][A-Za-z0-9_]{0,31}$",
         "Use 1–32 letters, numbers or underscores and start with a letter.",
@@ -224,16 +253,30 @@ class PublisherPlacement(models.Model):
         blank=True,
         help_text="Optional additional domains, one per line. The website domain is always allowed.",
     )
-    postback_url = models.URLField(
+    traffic_type = models.CharField(
+        max_length=12,
+        choices=TrafficType.choices,
+        default=TrafficType.INCENT,
+    )
+    postback_url = models.CharField(
         max_length=2000,
         blank=True,
-        help_text="Optional placement-specific HTTPS outcome endpoint.",
+        help_text="Optional placement-specific HTTPS outcome endpoint with supported macros.",
     )
     postback_enabled = models.BooleanField(default=False)
+    postback_email_opt_out = models.BooleanField(default=False)
+    whitelist_postback_ip = models.BooleanField(default=True)
     encrypted_postback_secret = models.TextField(blank=True, editable=False)
     postback_secret_last_four = models.CharField(max_length=4, blank=True, editable=False)
     postback_secret_changed_at = models.DateTimeField(null=True, blank=True, editable=False)
     currency = models.CharField(max_length=3, default="USD")
+    currency_name = models.CharField(max_length=16, default="Points")
+    user_revenue_share = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("100.00"),
+        validators=PERCENTAGE_VALIDATORS,
+    )
     currency_multiplier = models.DecimalField(
         max_digits=12,
         decimal_places=6,
@@ -242,6 +285,19 @@ class PublisherPlacement(models.Model):
             MinValueValidator(Decimal("0.000001")),
             MaxValueValidator(Decimal("100000.000000")),
         ],
+    )
+    reward_rounding_precision = models.PositiveSmallIntegerField(
+        choices=RewardPrecision.choices,
+        default=RewardPrecision.TWO,
+    )
+    active_content_types = models.JSONField(default=default_placement_content_types)
+    currency_icon = models.FileField(
+        upload_to=placement_currency_icon_path,
+        blank=True,
+    )
+    header_logo = models.FileField(
+        upload_to=placement_header_logo_path,
+        blank=True,
     )
     respondent_id_parameter = models.CharField(
         max_length=32,
@@ -303,6 +359,14 @@ class PublisherPlacement(models.Model):
     def allowed_domain_list(self):
         return [item for item in str(self.allowed_domains or "").splitlines() if item]
 
+    def display_reward(self, payout):
+        if payout is None:
+            return None
+        share = self.user_revenue_share / Decimal("100")
+        scaled = Decimal(payout) * self.currency_multiplier * share
+        quantum = Decimal("1").scaleb(-int(self.reward_rounding_precision))
+        return scaled.quantize(quantum)
+
     def set_postback_secret(self, raw_secret: str):
         raw_secret = str(raw_secret or "").strip()
         if len(raw_secret) < 32:
@@ -313,15 +377,70 @@ class PublisherPlacement(models.Model):
         self._generated_postback_secret = raw_secret
 
     def save(self, *args, **kwargs):
+        is_new = self._state.adding
         self.name = str(self.name or "").strip()
         self.website_name = str(self.website_name or "").strip()
         self.currency = str(self.currency or "USD").strip().upper()
+        if is_new and self.currency_name == "Points" and self.currency != "USD":
+            self.currency_name = self.currency
+        self.currency_name = str(self.currency_name or "Points").strip()[:16]
+        self.active_content_types = list(
+            dict.fromkeys(
+                item
+                for item in (self.active_content_types or [])
+                if item in {"offers", "survey", "live_survey"}
+            )
+        )
         if not self.encrypted_postback_secret:
             self.set_postback_secret(generate_signing_secret())
         super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.publisher.slug} · {self.name}"
+
+
+class PlacementEventPostback(models.Model):
+    """Optional offer/outcome-specific callback overriding a placement global URL."""
+
+    class EventType(models.TextChoices):
+        COMPLETE = "complete", "Completed"
+        TERMINATE = "terminate", "Terminated"
+        OVER_QUOTA = "over_quota", "Over quota"
+        QUALITY_TERMINATE = "quality_terminate", "Quality terminated"
+        REVERSAL = "reversal", "Reversal"
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    placement = models.ForeignKey(
+        PublisherPlacement,
+        on_delete=models.CASCADE,
+        related_name="event_postbacks",
+    )
+    survey = models.ForeignKey(
+        "surveys.Survey",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="offerwall_event_postbacks",
+    )
+    event_type = models.CharField(max_length=24, choices=EventType.choices)
+    event_name = models.CharField(max_length=120, blank=True)
+    callback_url = models.CharField(max_length=2000)
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["placement", "event_type", "is_active"],
+                name="placement_event_postback_idx",
+            )
+        ]
+
+    def __str__(self):
+        target = self.survey.local_id if self.survey_id else "all offers"
+        return f"{self.placement.name} · {target} · {self.event_type}"
 
 
 class WallVisit(models.Model):
