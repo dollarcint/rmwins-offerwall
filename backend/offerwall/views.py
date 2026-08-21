@@ -591,11 +591,7 @@ def _active_visit_or_error(request, visit_id, signature):
     return visit, None
 
 
-@require_GET
-def wall_session(request, visit_id):
-    visit, error = _active_visit_or_error(request, visit_id, request.GET.get("sig", ""))
-    if error:
-        return error
+def _render_wall_response(request, visit):
     offers = offer_catalog(visit.publisher, visit)
     placement = visit.placement
     header_logo_url = ""
@@ -626,6 +622,14 @@ def wall_session(request, visit_id):
     if placement:
         _apply_placement_frame_policy(response, placement)
     return _no_store(response)
+
+
+@require_GET
+def wall_session(request, visit_id):
+    visit, error = _active_visit_or_error(request, visit_id, request.GET.get("sig", ""))
+    if error:
+        return error
+    return _render_wall_response(request, visit)
 
 
 @require_GET
@@ -1489,7 +1493,7 @@ def _placement_embed_response(request, placement):
         idfa=request.GET.get("idfa", ""),
         gaid=request.GET.get("gaid", ""),
     )
-    return _no_store(HttpResponseRedirect(session_url(visit)))
+    return _render_wall_response(request, visit)
 
 
 @xframe_options_exempt

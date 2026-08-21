@@ -38,6 +38,7 @@ from .services import (
     create_wall_visit,
     offer_catalog,
     process_attempt_outcome,
+    session_url,
 )
 from .tasks import _validated_callback_url, deliver_postback_task
 from .wallet import request_withdrawal, transition_payout, wallet_summary
@@ -763,8 +764,9 @@ class OfferwallFlowTests(TestCase):
             f"{path}?uid=member-100&campaign_id=summer&subid=home",
             HTTP_REFERER="https://publisher.example.test/rewards",
         )
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("/wall/session/", response["Location"])
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Location", response)
+        self.assertContains(response, self.survey.name)
         visit = WallVisit.objects.get(external_user_id="member-100")
         self.assertEqual(visit.placement, placement)
         self.assertEqual(visit.external_campaign_id, "summer")
@@ -772,10 +774,8 @@ class OfferwallFlowTests(TestCase):
         offer = offer_catalog(self.publisher, visit)[0]
         self.assertEqual(offer["reward"], Decimal("350.000000"))
         self.assertEqual(offer["currency"], "PTS")
-        session_location = urlsplit(response["Location"])
-        session_page = self.client.get(
-            f"{session_location.path}?{session_location.query}"
-        )
+        session_location = urlsplit(session_url(visit))
+        session_page = self.client.get(f"{session_location.path}?{session_location.query}")
         self.assertEqual(session_page.status_code, 200)
         self.assertNotIn("X-Frame-Options", session_page)
 
@@ -799,7 +799,8 @@ class OfferwallFlowTests(TestCase):
                 "subid": "cta",
             },
         )
-        self.assertEqual(direct.status_code, 302)
+        self.assertEqual(direct.status_code, 200)
+        self.assertNotIn("Location", direct)
         direct_visit = WallVisit.objects.get(external_user_id="member-direct")
         self.assertEqual(direct_visit.external_campaign_id, "winter")
         self.assertEqual(direct_visit.affiliate_sub_id, "cta")
@@ -846,19 +847,15 @@ class OfferwallFlowTests(TestCase):
             {"SID": "partner-user"},
             HTTP_REFERER="https://rewards.partner.example.test/page",
         )
-        self.assertEqual(allowed.status_code, 302)
+        self.assertEqual(allowed.status_code, 200)
+        self.assertNotIn("Location", allowed)
         visit = WallVisit.objects.get(placement=placement)
         self.assertEqual(visit.external_user_id, "partner-user")
-        session_location = urlsplit(allowed["Location"])
-        session_page = self.client.get(
-            f"{session_location.path}?{session_location.query}",
-            HTTP_REFERER="https://rewards.partner.example.test/page",
-        )
-        self.assertEqual(session_page.status_code, 200)
-        self.assertNotIn("X-Frame-Options", session_page)
+        self.assertContains(allowed, self.survey.name)
+        self.assertNotIn("X-Frame-Options", allowed)
         self.assertIn(
             "https://*.partner.example.test",
-            session_page["Content-Security-Policy"],
+            allowed["Content-Security-Policy"],
         )
 
     def test_supplier_can_delete_own_placement(self):
