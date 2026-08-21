@@ -1,338 +1,191 @@
 {% extends 'offerwall/base.html' %}
-{% block title %}{{ placement.website_name }} settings · RM Wins Offerwall{% endblock %}
+{% block title %}Apps / Placements · RM Wins Offerwall{% endblock %}
 {% block content %}
-<section class="ow-apps-page ow-placement-settings-page" data-active-settings-tab="{{ active_settings_tab|default:'general' }}">
-  <header class="ow-apps-heading ow-settings-heading">
-    <div>
-      <a class="ow-settings-back" href="{% url 'offerwall:publisher-placements' %}">← Apps / Placements</a>
-      <h1>{{ placement.website_name }}</h1>
-      <p><code>{{ placement.app_id }}</code><span>·</span>{{ placement.get_platform_display }}<span>·</span><b class="ow-status {{ placement.status }}">{{ placement.get_status_display }}</b></p>
-    </div>
-    <a class="ow-settings-open-wall" href="{{ placement.embed_preview_url }}" target="_blank" rel="noopener">Preview placement ↗</a>
-  </header>
+<section class="ow-ou-settings" data-active-settings-tab="{{ active_settings_tab|default:'general' }}">
+  <nav class="ow-ou-settings-tabs" aria-label="Placement settings">
+    <button type="button" data-settings-tab="general"><i>☷</i>General</button>
+    <button type="button" data-settings-tab="currency"><i>$</i>Currency</button>
+    <button type="button" data-settings-tab="postback"><i>▤</i>Postback</button>
+    <button type="button" data-settings-tab="design"><i>▥</i>Design</button>
+    <button type="button" data-settings-tab="integrations"><i>◆</i>Integrations</button>
+  </nav>
 
-  <section class="ow-settings-shell">
-    <nav class="ow-settings-tabs" aria-label="Placement settings">
-      <button type="button" data-settings-tab="general">General</button>
-      <button type="button" data-settings-tab="currency">Currency</button>
-      <button type="button" data-settings-tab="postback">Postback</button>
-      <button type="button" data-settings-tab="design">Design</button>
-      <button type="button" data-settings-tab="integrations">Integrations</button>
-    </nav>
-
-    <div class="ow-settings-panel" data-settings-panel="general" id="general">
-      <div class="ow-panel-heading"><span>General</span><h2>Placement details</h2><p>Identify where this offerwall runs and choose the traffic sources it accepts.</p></div>
-      <form method="post" class="ow-settings-form" novalidate>
-        {% csrf_token %}<input type="hidden" name="form_type" value="general">
+  <div class="ow-ou-panel" data-settings-panel="general" id="general">
+    <div class="ow-ou-info">ⓘ <span>Manage your placement's core identification and primary web address. These details are used to identify your application across the platform.</span></div>
+    <section class="ow-ou-card">
+      <h2>General Information</h2>
+      <form method="post" novalidate>{% csrf_token %}<input type="hidden" name="form_type" value="general">
         {% if general_form.non_field_errors %}<div class="ow-field-errors">{{ general_form.non_field_errors }}</div>{% endif %}
-        <div class="ow-settings-grid">
-          <label><span>App / website name</span><input value="{{ placement.website_name }}" disabled></label>
-          <label><span>App unique ID</span><input value="{{ placement.app_id }}" disabled></label>
-          <label><span>Platform</span><input value="{{ placement.get_platform_display }}" disabled></label>
-          <label><span>Project URL</span><input value="{{ placement.website_url }}" disabled></label>
+        <div class="ow-ou-general-grid">
+          <label><b>▱ &nbsp; App / Website Name</b><input value="{{ placement.website_name }}" disabled><small>This is established during creation and cannot be changed.</small></label>
+          <label><b># &nbsp; App Unique ID</b><input value="{{ placement.app_id }}" disabled><small>System-generated ID used for cross-platform identification.</small></label>
+          <label><b>◎ &nbsp; Platform</b><input value="{{ placement.get_platform_display }}" disabled><small>The integrated platform for this placement.</small></label>
+          <label class="wide"><b>◎ &nbsp; Project / Website URL</b><input value="{{ placement.website_url }}" disabled><small>This is established during creation and cannot be changed.</small></label>
         </div>
-        <fieldset class="ow-choice-fieldset">
-          <legend>Traffic type <b>*</b></legend>
-          <p>Select which traffic model is allowed for this placement.</p>
-          {{ general_form.traffic_type }}{{ general_form.traffic_type.errors }}
-        </fieldset>
-        <label class="ow-field-label"><span>Additional allowed domains</span>{{ general_form.allowed_domains }}<small>One domain per line. The project URL domain is always allowed.</small>{{ general_form.allowed_domains.errors }}</label>
-        <footer class="ow-settings-save"><a href="{% url 'offerwall:publisher-placements' %}">Cancel</a><button type="submit">Save Changes</button></footer>
+        <fieldset class="ow-ou-traffic"><legend>ϟ &nbsp; Traffic Type</legend><div>
+          <label><input type="radio" name="traffic_type" value="incent" {% if general_form.traffic_type.value == 'incent' %}checked{% endif %}><span><b>Rewarded</b><small>Incent</small><em>Offer walls &amp; rewarded platforms</em></span></label>
+          <label><input type="radio" name="traffic_type" value="non_incent" {% if general_form.traffic_type.value == 'non_incent' %}checked{% endif %}><span><b>Non-Rewarded</b><small>Non-Incent</small><em>SEO, social, banners, email</em></span></label>
+          <label><input type="radio" name="traffic_type" value="both" {% if general_form.traffic_type.value == 'both' %}checked{% endif %}><span><b>All Sources</b><small>Both</small><em>Accepts all traffic sources</em></span></label>
+        </div><p>Select the traffic type allowed for this placement.</p>{{ general_form.traffic_type.errors }}</fieldset>
+        <footer class="ow-ou-form-actions"><button type="submit">Save Changes</button><button type="button" class="secondary" data-next-tab="currency">Next →</button></footer>
       </form>
-    </div>
+    </section>
+  </div>
 
-    <div class="ow-settings-panel" data-settings-panel="currency" id="currency" hidden>
-      <div class="ow-panel-heading"><span>Currency</span><h2>Reward configuration</h2><p>Convert publisher revenue into the reward amount shown to respondents.</p></div>
-      <form method="post" class="ow-settings-form" id="currency-settings-form" novalidate>
-        {% csrf_token %}<input type="hidden" name="form_type" value="currency">
+  <div class="ow-ou-panel" data-settings-panel="currency" id="currency" hidden>
+    <div class="ow-ou-info">ⓘ <span>Configure how your users are rewarded. The conversion rate determines how many virtual currency units a user receives for every USD you earn.</span></div>
+    <section class="ow-ou-card">
+      <h2>Currency Configuration</h2>
+      <form method="post" id="currency-settings-form" novalidate>{% csrf_token %}<input type="hidden" name="form_type" value="currency">
         {% if currency_form.non_field_errors %}<div class="ow-field-errors">{{ currency_form.non_field_errors }}</div>{% endif %}
-        <div class="ow-settings-grid">
-          <label><span>Currency name <b>*</b></span>{{ currency_form.currency_name }}<small>Examples: Coins, Points, Gems</small>{{ currency_form.currency_name.errors }}</label>
-          <label><span>User revenue split (%) <b>*</b></span>{{ currency_form.user_revenue_share }}<small>Percentage of your approved payout awarded to the user.</small>{{ currency_form.user_revenue_share.errors }}</label>
-          <label><span>Base conversion rate <b>*</b></span>{{ currency_form.currency_multiplier }}<small>1.00 payout × this rate = base reward.</small>{{ currency_form.currency_multiplier.errors }}</label>
-          <label><span>Rounding precision <b>*</b></span>{{ currency_form.reward_rounding_precision }}<small>Number of decimal places shown to respondents.</small>{{ currency_form.reward_rounding_precision.errors }}</label>
+        <div class="ow-ou-currency-grid">
+          <label><b>Currency Name <i>*</i></b>{{ currency_form.currency_name }}<small>Max 6 characters. This name will appear next to reward amounts.</small>{{ currency_form.currency_name.errors }}</label>
+          <label><b>User Revenue Split (%) <i>*</i></b><span class="ow-input-suffix">{{ currency_form.user_revenue_share }}<em>%</em></span><small>Percentage of revenue shared with your users (recommended: 70-80%).</small>{{ currency_form.user_revenue_share.errors }}</label>
+          <label><b>Base Conversion Rate <i>*</i></b>{{ currency_form.currency_multiplier }}<small>Example: 1000 means $1.00 USD revenue = 1000 base currency.</small>{{ currency_form.currency_multiplier.errors }}</label>
+          <label><b>Reward Rounding Precision <i>*</i></b>{{ currency_form.reward_rounding_precision }}<small>Determines the precision of the reward values shown to users.</small>{{ currency_form.reward_rounding_precision.errors }}</label>
         </div>
-        <section class="ow-reward-simulator" aria-live="polite">
-          <div><span>Reward simulation</span><strong>For a 1.00 {{ placement.currency }} payout</strong></div>
-          <p><b id="reward-simulation">—</b> <span id="reward-simulation-currency">{{ placement.currency_name }}</span></p>
-          <small>Conversion rate × user revenue split. Actual rewards use the verified offer payout.</small>
-        </section>
-        <footer class="ow-settings-save"><a href="{% url 'offerwall:publisher-placements' %}">Cancel</a><button type="submit">Save Changes</button></footer>
+        <div class="ow-ou-simulation">
+          <strong>Reward Simulation</strong><div><span><small>Base Conversion</small><b id="sim-rate">1</b> <em id="sim-currency-a">Points</em></span><i>×</i><span><small>Revenue Split</small><b id="sim-share">50%</b></span><i>=</i><span class="result"><small>User Earns per $1.00</small><b id="sim-result">0.50</b> <em id="sim-currency-b">Points</em></span></div>
+          <p>ⓘ In this setup, a $1.00 USD payout results in <b id="sim-sentence">0.50 Points</b> for the end user.</p>
+        </div>
+        <footer class="ow-ou-form-actions"><button type="submit">Save Configuration</button></footer>
       </form>
-    </div>
+    </section>
+  </div>
 
-    <div class="ow-settings-panel" data-settings-panel="postback" id="postback" hidden>
-      <div class="ow-panel-heading"><span>Postback</span><h2>Server-to-server callbacks</h2><p>Send signed survey outcomes to your server using a global URL or specific event rules.</p></div>
-      <nav class="ow-subtabs" aria-label="Postback type">
-        <button type="button" class="active" data-subtab="global-postback">Global Postback</button>
-        <button type="button" data-subtab="specific-postback">Specific Event Postback</button>
-      </nav>
-
-      <div data-subpanel="global-postback">
-        <form method="post" class="ow-settings-form" novalidate>
-          {% csrf_token %}<input type="hidden" name="form_type" value="postback">
+  <div class="ow-ou-panel" data-settings-panel="postback" id="postback" hidden>
+    <nav class="ow-ou-subtabs"><button type="button" class="active" data-postback-tab="global">Global Postback</button><button type="button" data-postback-tab="specific">Specific Event Postback</button></nav>
+    <div data-postback-panel="global">
+      <div class="ow-ou-info">ⓘ <span>Add your postback URL to receive real-time notifications on your server every time a conversion occurs. This is essential for rewarding your users automatically.</span></div>
+      <section class="ow-ou-card ow-ou-postback-card">
+        <form method="post" novalidate>{% csrf_token %}<input type="hidden" name="form_type" value="postback">
           {% if postback_form.non_field_errors %}<div class="ow-field-errors">{{ postback_form.non_field_errors }}</div>{% endif %}
-          <label class="ow-switch-row">{{ postback_form.postback_enabled }}<span><b>Enable global postback</b><small>Receive completed, terminated, over-quota, quality and reversal outcomes.</small></span></label>
-          <label class="ow-field-label"><span>Postback URL <b>*</b></span>{{ postback_form.postback_url }}<small>HTTPS only. Add any supported macros shown below.</small>{{ postback_form.postback_url.errors }}</label>
-          <div class="ow-postback-options">
-            <label>{{ postback_form.whitelist_postback_ip }}<span><b>Whitelist RM Wins postback IP</b><small>Allow <code>{{ postback_source_ip }}</code> on your server.</small></span></label>
-            <label>{{ postback_form.postback_email_opt_out }}<span><b>Disable postback failure emails</b><small>Delivery failures remain visible in reports.</small></span></label>
-          </div>
-          <div class="ow-settings-grid ow-mapping-grid">
-            <label><span>Respondent ID variable</span>{{ postback_form.respondent_id_parameter }}{{ postback_form.respondent_id_parameter.errors }}</label>
-            <label><span>Campaign ID variable</span>{{ postback_form.campaign_id_parameter }}{{ postback_form.campaign_id_parameter.errors }}</label>
-            <label><span>Affiliate sub variable</span>{{ postback_form.affiliate_sub_parameter }}{{ postback_form.affiliate_sub_parameter.errors }}</label>
-          </div>
-          <section class="ow-macro-section">
-            <header><h3>Available macros</h3><p>Values are URL encoded before delivery.</p></header>
-            <div class="ow-macro-grid">
-              <button type="button" data-copy-value="{SID}"><code>{SID}</code><span>Respondent ID</span></button>
-              <button type="button" data-copy-value="{OFFERID}"><code>{OFFERID}</code><span>Survey ID</span></button>
-              <button type="button" data-copy-value="{STATUS}"><code>{STATUS}</code><span>Outcome status</span></button>
-              <button type="button" data-copy-value="{PAYOUT}"><code>{PAYOUT}</code><span>User reward</span></button>
-              <button type="button" data-copy-value="{PUBPAYOUT}"><code>{PUBPAYOUT}</code><span>Publisher payout</span></button>
-              <button type="button" data-copy-value="{SID2}"><code>{SID2}</code><span>Affiliate sub</span></button>
-              <button type="button" data-copy-value="{TransactionID}"><code>{TransactionID}</code><span>Transaction ID</span></button>
-              <button type="button" data-copy-value="{eventid}"><code>{eventid}</code><span>Event ID</span></button>
-              <button type="button" data-copy-value="{eventname}"><code>{eventname}</code><span>Event name</span></button>
-              <button type="button" data-copy-value="{app_id}"><code>{app_id}</code><span>App ID</span></button>
-              <button type="button" data-copy-value="{SIG}"><code>{SIG}</code><span>Transaction HMAC</span></button>
-            </div>
+          <label class="ow-ou-field"><b>Postback URL <i>*</i></b><span class="ow-clearable">{{ postback_form.postback_url }}<button type="button" data-clear-postback aria-label="Clear Postback URL">×</button></span>{{ postback_form.postback_url.errors }}</label>
+          <label class="ow-ou-checkbox">{{ postback_form.whitelist_postback_ip }}<span>Whitelist IP: {{ postback_source_ip }}</span></label>
+          <p class="ow-ou-help">We expect a response body of "1" for a successful postback.</p>
+          <label class="ow-ou-checkbox">{{ postback_form.postback_email_opt_out }}<span>Opt-out from postback email notifications</span></label>
+          <p class="ow-ou-help">Check this if you do not want to receive postback success/failure emails.</p>
+
+          {% include 'offerwall/includes/postback_macros.html' %}
+          <section class="ow-ou-security">
+            <header><h3>Security &amp; Verification</h3></header>
+            <div class="ow-ou-secret-line"><span><small>Secret Token</small><code id="postback-secret">{{ placement.postback_secret_plain }}</code></span><button type="button" data-copy-target="postback-secret">Copy</button></div>
+            <p>Used to verify postbacks originate from our system. Keep this private.</p>
+            <div class="ow-ou-hash-grid"><div><span>Javascript Hash</span><button type="button" data-copy-target="js-hash">Copy</button><pre id="js-hash">const crypto = require('crypto');
+const calculatedHash = crypto
+  .createHmac("sha256", "{{ placement.postback_secret_plain }}")
+  .update(transactionId)
+  .digest("hex");</pre></div><div><span>PHP Hash</span><button type="button" data-copy-target="php-hash">Copy</button><pre id="php-hash">$calculatedHash = hash_hmac(
+  'sha256', $transactionId,
+  '{{ placement.postback_secret_plain }}'
+);</pre></div></div>
           </section>
-          <footer class="ow-settings-save"><a href="{% url 'offerwall:publisher-placements' %}">Cancel</a><button type="submit">Save Changes</button></footer>
+          <footer class="ow-ou-form-actions between"><button type="submit" formaction="{% url 'offerwall:publisher-placement-postback-test' placement.public_id %}" formmethod="post" class="secondary">Test Postback Connection</button><span><a href="{% url 'offerwall:publisher-placements' %}">Cancel</a><button type="submit">Save Configuration</button></span></footer>
         </form>
-
-        <div class="ow-settings-utility-grid">
-          <section class="ow-secret-card">
-            <header><div><span>Security</span><h3>Postback signing key</h3></div><b>{{ placement.masked_postback_secret }}</b></header>
-            <p>Verify <code>X-Offerwall-Signature</code> against the exact raw JSON request body before crediting.</p>
-            {% if placement.revealed_postback_secret %}<div class="ow-one-time-secret"><strong>Copy now — this key is shown once.</strong><textarea id="postback-secret" rows="2" readonly>{{ placement.revealed_postback_secret }}</textarea><button type="button" data-copy-target="postback-secret">Copy key</button></div>{% endif %}
-            <div class="ow-hash-examples">
-              <details><summary>JavaScript verification</summary><pre><code>const bodyHash = crypto.createHash('sha256').update(rawBody).digest('hex');
-const canonical = `offerwall-postback-v1\n${timestamp}\n${eventId}\n${bodyHash}`;
-const expected = crypto.createHmac('sha256', POSTBACK_SECRET).update(canonical).digest('hex');
-const valid = crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));</code></pre></details>
-              <details><summary>PHP verification</summary><pre><code>$bodyHash = hash('sha256', $rawBody);
-$canonical = "offerwall-postback-v1\n{$timestamp}\n{$eventId}\n{$bodyHash}";
-$expected = hash_hmac('sha256', $canonical, $secret);
-$valid = hash_equals($expected, str_replace('sha256=', '', $signature));</code></pre></details>
-            </div>
-            <form method="post" action="{% url 'offerwall:publisher-placement-action' placement.public_id %}" onsubmit="return confirm('Rotate the signing key? Your existing verification will stop working.');">{% csrf_token %}<input type="hidden" name="action" value="rotate-postback-secret"><button type="submit" class="ow-secondary-button">Rotate signing key</button></form>
-          </section>
-          <section class="ow-test-card">
-            <span>Delivery check</span><h3>Test Postback</h3><p>Send a signed test event to the saved global URL. Your endpoint should return HTTP 2xx.</p>
-            <form method="post" action="{% url 'offerwall:publisher-placement-postback-test' placement.public_id %}">{% csrf_token %}<button type="submit" class="ow-primary-button">Send test postback</button></form>
-          </section>
-        </div>
-      </div>
-
-      <div data-subpanel="specific-postback" hidden>
-        <div class="ow-settings-form">
-          <section class="ow-specific-intro"><div><span>Specific Event Postback</span><h3>Override the global URL for an event</h3></div><p>A survey-specific rule wins first; a matching all-offers rule is used next; otherwise the global URL receives the event.</p></section>
-          <form method="post" action="{% url 'offerwall:publisher-placement-event-postback-add' placement.public_id %}" class="ow-event-form" novalidate>
-            {% csrf_token %}
-            {% if event_form.non_field_errors %}<div class="ow-field-errors wide">{{ event_form.non_field_errors }}</div>{% endif %}
-            <label><span>Survey ID</span>{{ event_form.survey_id }}<small>Leave empty for all offers.</small>{{ event_form.survey_id.errors }}</label>
-            <label><span>Event <b>*</b></span>{{ event_form.event_type }}{{ event_form.event_type.errors }}</label>
-            <label><span>Rule name</span>{{ event_form.event_name }}{{ event_form.event_name.errors }}</label>
-            <label class="wide"><span>Postback URL <b>*</b></span>{{ event_form.callback_url }}{{ event_form.callback_url.errors }}</label>
-            <button type="submit" class="ow-primary-button">Add Postback</button>
-          </form>
-          <div class="ow-event-table-wrap">
-            <table class="ow-event-table">
-              <thead><tr><th>Survey</th><th>Event</th><th>Name</th><th>Postback URL</th><th>Status</th><th>Actions</th></tr></thead>
-              <tbody>
-                {% for rule in event_postbacks %}<tr>
-                  <td>{% if rule.survey %}{{ rule.survey.local_id }}{% else %}All offers{% endif %}</td>
-                  <td>{{ rule.get_event_type_display }}</td><td>{{ rule.event_name|default:'—' }}</td>
-                  <td><code title="{{ rule.callback_url }}">{{ rule.callback_url|truncatechars:45 }}</code></td>
-                  <td><span class="ow-rule-status{% if rule.is_active %} active{% endif %}">{% if rule.is_active %}Active{% else %}Paused{% endif %}</span></td>
-                  <td><form method="post" action="{% url 'offerwall:publisher-placement-event-postback-action' placement.public_id rule.public_id %}">{% csrf_token %}<button name="action" value="toggle" type="submit">{% if rule.is_active %}Pause{% else %}Activate{% endif %}</button><button name="action" value="delete" type="submit" class="danger" onclick="return confirm('Delete this postback rule?');">Delete</button></form></td>
-                </tr>{% empty %}<tr><td colspan="6" class="ow-table-empty">No specific event postbacks added yet.</td></tr>{% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+        <form method="post" action="{% url 'offerwall:publisher-placement-action' placement.public_id %}" class="ow-reset-secret" onsubmit="return confirm('Reset postback secret?');">{% csrf_token %}<input type="hidden" name="action" value="rotate-postback-secret"><button type="submit">Reset Postback Secret</button></form>
+      </section>
     </div>
-
-    <div class="ow-settings-panel" data-settings-panel="design" id="design" hidden>
-      <div class="ow-panel-heading"><span>Design</span><h2>Offerwall appearance</h2><p>Choose the content shown and upload placement-specific reward and header branding.</p></div>
-      <form method="post" enctype="multipart/form-data" class="ow-settings-form" novalidate>
-        {% csrf_token %}<input type="hidden" name="form_type" value="design">
-        {% if design_form.non_field_errors %}<div class="ow-field-errors">{{ design_form.non_field_errors }}</div>{% endif %}
-        <fieldset class="ow-content-types">
-          <legend>Active content types <b>*</b></legend><p>Select what respondents can see inside this placement.</p>
-          {{ design_form.active_content_types }}{{ design_form.active_content_types.errors }}
-        </fieldset>
-        <div class="ow-upload-grid">
-          <section class="ow-upload-card">
-            <div class="ow-upload-preview icon">{% if placement.currency_icon_public_url %}<img src="{{ placement.currency_icon_public_url }}" alt="Current currency icon">{% else %}<span>¤</span>{% endif %}</div>
-            <div><span>Currency Icon</span><h3>Reward icon</h3><p>PNG, JPEG or WebP. Recommended 25 × 25 px, maximum 500 KB.</p>{{ design_form.currency_icon }}{{ design_form.currency_icon.errors }}</div>
-          </section>
-          <section class="ow-upload-card">
-            <div class="ow-upload-preview logo">{% if placement.header_logo_public_url %}<img src="{{ placement.header_logo_public_url }}" alt="Current header logo">{% else %}<span>RM</span>{% endif %}</div>
-            <div><span>Header Logo</span><h3>Placement logo</h3><p>PNG, JPEG or WebP. Recommended 200 × 51 px, maximum 2 MB.</p>{{ design_form.header_logo }}{{ design_form.header_logo.errors }}</div>
-          </section>
-        </div>
-        <footer class="ow-settings-save"><a href="{% url 'offerwall:publisher-placements' %}">Cancel</a><button type="submit">Save Changes</button></footer>
-      </form>
+    <div data-postback-panel="specific" hidden>
+      <section class="ow-ou-specific-list"><header><div><h2>Specific Event Postbacks</h2><p>Manage postbacks for specific events or offers</p></div><a href="{% url 'offerwall:publisher-placement-event-postback-add' placement.public_id %}">＋ Add New Event Postback</a></header>
+        <div class="ow-event-table-wrap"><table class="ow-event-table"><thead><tr><th>Offer/ ID/ Level</th><th>Event Name/ Postback URL</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>
+          {% for rule in event_postbacks %}<tr><td><strong>{{ rule.survey.name|default:'All offers' }}</strong><small>{% if rule.survey %}ID: {{ rule.survey.local_id }}{% endif %}</small></td><td><strong>{{ rule.event_name }}</strong><code>{{ rule.callback_url|truncatechars:60 }}</code></td><td><span class="ow-rule-status{% if rule.is_active %} active{% endif %}">{% if rule.is_active %}Active{% else %}Inactive{% endif %}</span></td><td>{{ rule.created_at|date:'F j, Y' }}</td><td><form method="post" action="{% url 'offerwall:publisher-placement-event-postback-action' placement.public_id rule.public_id %}">{% csrf_token %}<button name="action" value="toggle">{% if rule.is_active %}Disable{% else %}Enable{% endif %}</button><button name="action" value="delete" class="danger" onclick="return confirm('Delete this postback?');">Delete</button></form></td></tr>
+          {% empty %}<tr><td colspan="5" class="ow-table-empty">No specific event postbacks found.</td></tr>{% endfor %}
+        </tbody></table></div>
+      </section>
     </div>
+  </div>
 
-    <div class="ow-settings-panel" data-settings-panel="integrations" id="integrations" hidden>
-      <div class="ow-panel-heading"><span>Quick Integrations</span><h2>Connect this placement</h2><p>Use the inventory API, responsive iFrame, native WebView or the REST wrapper examples.</p></div>
-      <nav class="ow-subtabs ow-integration-tabs" aria-label="Integration type">
-        <button type="button" class="active" data-integration-tab="api">API</button>
-        <button type="button" data-integration-tab="iframe">iFrame</button>
-        <button type="button" data-integration-tab="android-webview">Android WebView</button>
-        <button type="button" data-integration-tab="ios-webview">iOS WebView</button>
-        <button type="button" data-integration-tab="android-sdk">Android SDK</button>
-        <button type="button" data-integration-tab="ios-sdk">iOS SDK</button>
-      </nav>
+  <div class="ow-ou-panel" data-settings-panel="design" id="design" hidden>
+    <header class="ow-ou-design-title"><h2>Offerwall Customization</h2><p>Configure your placement's content types and branding to match your application's style.</p></header>
+    <form method="post" enctype="multipart/form-data" novalidate>{% csrf_token %}<input type="hidden" name="form_type" value="design">
+      <section class="ow-ou-card"><h2>Active Content Types</h2><p class="ow-ou-help">Select which categories should be visible on your Offer Wall. At least one must be selected.</p><div class="ow-ou-content-types">{{ design_form.active_content_types }}</div>{{ design_form.active_content_types.errors }}</section>
+      <section class="ow-ou-card ow-ou-branding"><h2>Branding &amp; Appearance</h2><div>
+        <article><div><h3>Currency Icon</h3><p>This icon represents your virtual currency in the offer wall.</p>{% if placement.currency_icon_public_url %}<img src="{{ placement.currency_icon_public_url }}" alt="Currency icon">{% endif %}</div><label>Change{{ design_form.currency_icon }}</label><ul><li>Transparent PNG preferred</li><li>Size: 25x25 (max 500KB)</li></ul></article>
+        <article><div><h3>Header Logo</h3><p>The main logo displayed at the top of the offer wall.</p>{% if placement.header_logo_public_url %}<img class="logo" src="{{ placement.header_logo_public_url }}" alt="Wall Logo">{% endif %}</div><label>Replace Logo{{ design_form.header_logo }}</label><p>Recommended dimensions: 200x51 pixels for optimal desktop and mobile visibility.</p></article>
+      </div><footer class="ow-ou-form-actions"><button type="submit">Save Design Settings</button></footer></section>
+    </form>
+  </div>
 
-      <div class="ow-integration-panel" data-integration-panel="api">
-        <div class="ow-api-details">
-          <section><span>Publisher ID</span><strong>{{ portal_publisher.public_id }}</strong></section>
-          <section><span>App ID</span><strong>{{ placement.app_id }}</strong></section>
-          <section><span>Base URL</span><strong>{{ placement.api_url }}</strong></section>
-          <section><span>API key</span><strong>{% if placement.revealed_api_key %}Shown below{% else %}{{ portal_publisher.masked_api_key }}{% endif %}</strong></section>
-        </div>
-        {% if placement.revealed_api_key %}<div class="ow-one-time-secret"><strong>Copy this API key now — it will not be shown again.</strong><textarea id="api-secret" rows="2" readonly>{{ placement.revealed_api_key }}</textarea><button type="button" data-copy-target="api-secret">Copy key</button></div>{% endif %}
-        <form method="post" action="{% url 'offerwall:publisher-placement-action' placement.public_id %}" class="ow-inline-action" onsubmit="return confirm('Generate a new API key? The current key will stop working.');">{% csrf_token %}<input type="hidden" name="action" value="rotate-api-key"><button type="submit" class="ow-secondary-button">{% if portal_publisher.api_key_hash %}Rotate API key{% else %}Request API key{% endif %}</button></form>
-        <div class="ow-iframe-grid">
-          <div class="ow-code-panel"><div><h3>GET offers</h3><button type="button" data-copy-target="api-example">Copy request</button></div><textarea id="api-example" readonly rows="5">{{ placement.api_example_url }}</textarea><p>Header authentication is also supported: <code>Authorization: Bearer YOUR_API_KEY</code>.</p></div>
-          <div class="ow-schema-card"><h3>Request parameters</h3><dl><div><dt>key</dt><dd>Publisher API key</dd></div><div><dt>app_id</dt><dd>{{ placement.app_id }}</dd></div><div><dt>uid</dt><dd>Your unique respondent ID</dd></div><div><dt>campaign_id</dt><dd>Optional campaign attribution</dd></div><div><dt>sid2</dt><dd>Optional affiliate sub ID</dd></div></dl></div>
-        </div>
-        <div class="ow-code-panel ow-response-example"><div><h3>Response example</h3><button type="button" data-copy-target="api-response">Copy JSON</button></div><textarea id="api-response" readonly rows="12">{
-  "ok": true,
-  "app_id": "{{ placement.app_id }}",
-  "currency": "{{ placement.currency_name }}",
-  "offers": [{
-    "id": "survey_id",
-    "title": "Survey title",
-    "reward": "120.00",
-    "loi": 8,
-    "click_url": "https://offerwall.rmwinsights.com/..."
-  }]
+  <div class="ow-ou-panel ow-ou-integrations" data-settings-panel="integrations" id="integrations" hidden>
+    <h2>Integrations</h2><span class="ow-ou-quick-label">Quick Integrations</span>
+    <nav class="ow-ou-integration-jumps"><button data-scroll-target="api-integration">API</button><button data-scroll-target="iframe-integration">iFrame</button><button data-scroll-target="android-webview">Android WebView</button><button data-scroll-target="ios-webview">iOS WebView</button><button data-scroll-target="android-sdk">Android SDK</button><button data-scroll-target="ios-sdk">iOS SDK</button></nav>
+    <p class="ow-ou-jump-help">Click any option above to quickly jump to that integration method</p>
+
+    <section class="ow-ou-doc-section" id="api-integration"><h3>API Key &amp; Details</h3>
+      <div class="ow-ou-api-details"><p><span>Publisher ID:</span><code id="publisher-id">{{ portal_publisher.public_id }}</code></p><p><span>API:</span><b>{% if placement.api_key_plain %}ON{% else %}OFF{% endif %}</b></p><p><span>API Base URL:</span><em>GET</em><code id="api-base">{{ placement.api_url }}?</code></p><p><span>App ID:</span><code id="app-id">{{ placement.app_id }}</code></p><p><span>API key:</span><code id="api-key">{{ placement.api_key_plain|default:'No api key found!' }}</code></p></div>
+      <form method="post" action="{% url 'offerwall:publisher-placement-action' placement.public_id %}" onsubmit="return confirm('Generating a new API key will invalidate the current key. Continue?');">{% csrf_token %}<input type="hidden" name="action" value="rotate-api-key"><button class="ow-ou-orange-button">{% if placement.api_key_plain %}Generate New API Key{% else %}Request API Key{% endif %}</button></form><p class="ow-ou-warning">Warning: Generating a new API key will render your current key invalid</p>
+      <h4>Use Cases</h4><p>The RM Wins Offers API supports fetching real-time offers, asynchronously caching inventory, and retrieving offers for a placement.</p>
+      <h4>Request Query Params</h4><p>The Offers API accepts a GET request with these query params:</p>
+      <div class="ow-ou-param-list">
+        <article><code>key</code><b>REQUIRED</b><span>Data type: string</span><p>Your account's API Key.</p></article>
+        <article><code>pubid</code><b>REQUIRED</b><span>Data type: string</span><p>Your unique publisher ID. Example: {{ portal_publisher.public_id }}</p></article>
+        <article><code>app_id</code><b>REQUIRED</b><span>Data type: string</span><p>The unique identifier for this placement.</p></article>
+        <article><code>platform</code><b>OPTIONAL</b><span>Data type: string</span><p>Valid values: iPhone, Android, All. Default: All.</p></article>
+        <article><code>country</code><b>OPTIONAL</b><span>Data type: string</span><p>User country ISO code or All. Default: All.</p></article>
+        <article><code>type</code><b>OPTIONAL</b><span>Data type: string</span><p>Use live_surveys to fetch live surveys.</p></article>
+        <article><code>payoutType</code><b>OPTIONAL</b><span>Data type: string</span><p>Valid values: percentage, flat.</p></article>
+      </div>
+      <h4>Route Response Data</h4><p>200 means success; 400 contains a message describing the invalid request.</p>
+      <div class="ow-code-panel"><div><h3>Live Survey Example Response</h3><button type="button" data-copy-target="api-response">Copy JSON</button></div><textarea id="api-response" rows="17" readonly>{
+  "message": "success", "type": 1, "code": 200,
+  "data": { "query": { "pubid": "{{ portal_publisher.public_id }}", "appid": "{{ placement.app_id }}", "country": "All", "platform": "All" },
+  "response": { "currency_name": "{{ placement.currency_name }}", "offers": [{
+    "offer_id": "survey_id", "offer_name": "Survey title",
+    "traffic_type": "{{ placement.traffic_type }}",
+    "offer_url_easy": "...&uid={SID}&sid={YOUR_CLICK_ID}&sid2={YOUR_SOURCE_ID}",
+    "payout": 1.25, "offer_type": "Consumer", "loi": 10, "ir": 45
+  }]}}
 }</textarea></div>
-      </div>
+    </section>
 
-      <div class="ow-integration-panel" data-integration-panel="iframe" hidden>
-        <div class="ow-iframe-grid">
-          <div class="ow-code-panel"><div><h3>Recommended iframe</h3><button type="button" data-copy-target="placement-iframe">Copy Code</button></div><textarea id="placement-iframe" readonly rows="8">{{ placement.iframe_code }}</textarea><p>Replace <code>{SID}</code>, <code>{CAMPAIGN_ID}</code> and <code>{SID2}</code> on your server before rendering.</p></div>
-          <div class="ow-code-panel"><div><h3>Direct URL</h3><button type="button" data-copy-target="placement-direct">Copy URL</button></div><textarea id="placement-direct" readonly rows="8">{{ placement.direct_url }}</textarea><p>Use the direct link for a new tab or a full-page rewards experience.</p></div>
-        </div>
-        <div class="ow-iframe-preview"><div><h3>Live Preview</h3><span>{{ placement.app_id }}</span></div><iframe src="{{ placement.embed_preview_url }}" title="{{ placement.name }} preview" loading="lazy"></iframe></div>
-      </div>
+    <section class="ow-ou-doc-section" id="iframe-integration"><p class="ow-ou-section-kicker">Integration Iframe</p><h3>HTML5 / iFrame</h3><div class="ow-code-panel"><div><h3>Offer Wall iFrame</h3><button type="button" data-copy-target="iframe-code">Copy Code</button></div><textarea id="iframe-code" rows="11" readonly>{{ placement.iframe_code }}</textarea></div><p><strong>{SID}*</strong> - Your unique user ID passed in the offer URL.</p></section>
 
-      <div class="ow-integration-panel" data-integration-panel="android-webview" hidden>
-        <article class="ow-guide"><span>Android WebView</span><h3>Load the offerwall inside your Android app</h3><ol><li>Enable JavaScript, DOM storage and third-party navigation handling.</li><li>Build the placement URL with your authenticated user ID.</li><li>Open external survey links in the WebView or the system browser.</li><li>Credit only after receiving and verifying the server postback.</li></ol></article>
-        <div class="ow-code-panel"><div><h3>Kotlin example</h3><button type="button" data-copy-target="android-webview-code">Copy code</button></div><textarea id="android-webview-code" readonly rows="14">val wall = findViewById&lt;WebView&gt;(R.id.offerwall)
-wall.settings.javaScriptEnabled = true
-wall.settings.domStorageEnabled = true
-val sid = URLEncoder.encode(currentUser.id, "UTF-8")
-val url = "{{ placement.embed_preview_url }}?{{ placement.respondent_id_parameter }}=$sid"
-wall.webViewClient = object : WebViewClient() {
-  override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-    view.loadUrl(request.url.toString())
-    return true
-  }
+    <section class="ow-ou-doc-section" id="android-webview"><p class="ow-ou-section-kicker">Android WebView Integration Guide</p><p>The simplest way to integrate the RM Wins Offerwall into your Android app is using a WebView. This requires minimal setup and no SDK installation.</p><h3>Step 1: Add WebView to Your Layout</h3><div class="ow-code-panel"><div><h3>activity_offerwall.xml</h3><button data-copy-target="android-layout">Copy Code</button></div><textarea id="android-layout" rows="9" readonly>&lt;WebView
+  android:id="@+id/webview"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent" /&gt;</textarea></div><h3>Step 2: Configure WebView in Your Activity</h3><div class="ow-code-panel"><div><h3>OfferwallActivity.kt</h3><button data-copy-target="android-code">Copy Code</button></div><textarea id="android-code" rows="14" readonly>webView.settings.apply {
+  javaScriptEnabled = true
+  domStorageEnabled = true
+  loadWithOverviewMode = true
+  useWideViewPort = true
 }
-wall.loadUrl(url)</textarea></div>
-      </div>
+webView.webViewClient = WebViewClient()
+val userId = "USER_UNIQUE_ID"
+val offerwallUrl = "{{ placement.embed_preview_url }}?SID=$userId"
+webView.loadUrl(offerwallUrl)</textarea></div><h3>Offerwall URL</h3><code class="ow-ou-url-code">{{ placement.embed_preview_url }}?SID={SID}</code><h3>WebView Integration Checklist</h3><ul><li><b>Internet Permission:</b> Add android.permission.INTERNET.</li><li><b>JavaScript Enabled:</b> Set javaScriptEnabled = true.</li><li><b>User Identifier:</b> Replace {SID} with the unique user ID.</li><li><b>Back Button Handling:</b> Allow WebView back navigation.</li></ul></section>
 
-      <div class="ow-integration-panel" data-integration-panel="ios-webview" hidden>
-        <article class="ow-guide"><span>iOS WebView</span><h3>Embed the offerwall with WKWebView</h3><ol><li>Create the placement URL using the signed-in user ID.</li><li>Use persistent website data so survey sessions remain stable.</li><li>Handle target=_blank navigation in your navigation delegate.</li><li>Credit rewards from verified postbacks, never from client navigation.</li></ol></article>
-        <div class="ow-code-panel"><div><h3>Swift example</h3><button type="button" data-copy-target="ios-webview-code">Copy code</button></div><textarea id="ios-webview-code" readonly rows="13">let config = WKWebViewConfiguration()
-config.websiteDataStore = .default()
-let webView = WKWebView(frame: view.bounds, configuration: config)
-let sid = currentUser.id.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
-let url = URL(string: "{{ placement.embed_preview_url }}?{{ placement.respondent_id_parameter }}=\(sid)")!
-webView.navigationDelegate = self
-webView.load(URLRequest(url: url))
-view.addSubview(webView)</textarea></div>
-      </div>
+    <section class="ow-ou-doc-section" id="ios-webview"><p class="ow-ou-section-kicker">iOS WebView Integration Guide</p><p>Use WKWebView for a minimal integration with no SDK installation.</p><h3>Step 1: Import WebKit Framework</h3><div class="ow-code-panel"><div><h3>Import WebKit</h3><button data-copy-target="ios-import">Copy Code</button></div><textarea id="ios-import" rows="2" readonly>import WebKit</textarea></div><h3>Step 2: Configure WKWebView</h3><div class="ow-code-panel"><div><h3>OfferwallViewController.swift</h3><button data-copy-target="ios-code">Copy Code</button></div><textarea id="ios-code" rows="12" readonly>let configuration = WKWebViewConfiguration()
+configuration.allowsInlineMediaPlayback = true
+let webView = WKWebView(frame: view.bounds, configuration: configuration)
+let userId = "USER_UNIQUE_ID"
+let offerwallURL = "{{ placement.embed_preview_url }}?SID=\(userId)"
+if let url = URL(string: offerwallURL) {
+  webView.load(URLRequest(url: url))
+}</textarea></div><h3>Offerwall URL</h3><code class="ow-ou-url-code">{{ placement.embed_preview_url }}?SID={SID}</code><h3>iOS WebView Integration Checklist</h3><ul><li><b>WKWebView:</b> Do not use deprecated UIWebView.</li><li><b>App Transport Security:</b> Allow secure HTTPS.</li><li><b>User Identifier:</b> Replace {SID}.</li><li><b>Navigation:</b> Implement WKNavigationDelegate.</li></ul></section>
 
-      <div class="ow-integration-panel" data-integration-panel="android-sdk" hidden>
-        <article class="ow-guide"><span>Android REST wrapper</span><h3>Fetch offers for a native Android UI</h3><p>Call the inventory endpoint from your backend so the API key never ships inside the APK. Return only the eligible offer data to the app, then open the supplied <code>click_url</code>.</p></article>
-        <div class="ow-code-panel"><div><h3>Kotlin response models</h3><button type="button" data-copy-target="android-sdk-code">Copy code</button></div><textarea id="android-sdk-code" readonly rows="12">data class Offer(val id: String, val title: String, val reward: String, val click_url: String)
-data class OfferResponse(val ok: Boolean, val currency: String, val offers: List&lt;Offer&gt;)
+    <section class="ow-ou-doc-section" id="android-sdk"><p class="ow-ou-section-kicker">Android SDK Integration Guide</p><p>Use the API from your secure backend and return the standardized response to your Android app.</p><h3>Step 1: Create Response Models</h3><div class="ow-code-panel"><div><h3>Offer.kt</h3><button data-copy-target="android-sdk-code">Copy Code</button></div><textarea id="android-sdk-code" rows="8" readonly>data class Offer(val offerId: String, val offerName: String, val payout: Double, val offerUrlEasy: String)
+data class OffersResponse(val message: String, val code: Int, val data: Data)</textarea></div><h3>Step 2: Fetch Offers and Surveys</h3><code class="ow-ou-url-code">{{ placement.api_example_url }}</code><h3>Response Format</h3><p>Numeric IDs should be converted to strings and keys mapped to camelCase inside your app.</p><h3>SDK Integration Checklist</h3><ul><li><b>Internet Permission:</b> Required.</li><li><b>API Key:</b> Keep it on your server.</li><li><b>Error Handling:</b> Handle non-200 responses.</li></ul></section>
 
-// Your backend calls:
-// {{ placement.api_example_url }}
-// The Android app requests the sanitized result from your own API.
-// Open offer.click_url in a Custom Tab or WebView.</textarea></div>
-      </div>
-
-      <div class="ow-integration-panel" data-integration-panel="ios-sdk" hidden>
-        <article class="ow-guide"><span>iOS REST wrapper</span><h3>Fetch offers for a native iOS UI</h3><p>Keep the API key on your server. Your iOS app consumes your authenticated proxy response and presents the returned offers using SwiftUI or UIKit.</p></article>
-        <div class="ow-code-panel"><div><h3>Swift response models</h3><button type="button" data-copy-target="ios-sdk-code">Copy code</button></div><textarea id="ios-sdk-code" readonly rows="12">struct Offer: Decodable, Identifiable {
+    <section class="ow-ou-doc-section" id="ios-sdk"><p class="ow-ou-section-kicker">iOS SDK Integration Guide</p><p>Use your authenticated backend as the secure API proxy, then decode the response using Swift.</p><h3>Requirements</h3><ul><li><b>iOS Target:</b> 13.0 or higher</li><li><b>Xcode:</b> 13.0 or newer</li><li><b>Swift:</b> 5.0+</li></ul><h3>Step 1: Create Response Models</h3><div class="ow-code-panel"><div><h3>Offer.swift</h3><button data-copy-target="ios-sdk-code">Copy Code</button></div><textarea id="ios-sdk-code" rows="10" readonly>struct Offer: Decodable, Identifiable {
   let id: String
-  let title: String
-  let reward: String
-  let click_url: URL
-}
-struct OfferResponse: Decodable {
-  let ok: Bool
-  let currency: String
-  let offers: [Offer]
-}</textarea></div>
-      </div>
-    </div>
-  </section>
+  let offerName: String
+  let payout: Double
+  let offerUrlEasy: URL
+}</textarea></div><h3>Step 2: Fetching Surveys</h3><code class="ow-ou-url-code">{{ placement.api_example_url }}</code><h3>iOS SDK Integration Checklist</h3><ul><li><b>Async/Await:</b> Call inside an async context.</li><li><b>API Key:</b> Never bundle it in the app.</li><li><b>Error Handling:</b> Handle decoding and network failures.</li></ul></section>
+  </div>
 </section>
 <script>
 (() => {
-  const page = document.querySelector('.ow-placement-settings-page');
-  const settingsButtons = [...document.querySelectorAll('[data-settings-tab]')];
-  const settingsPanels = [...document.querySelectorAll('[data-settings-panel]')];
-  const allowedTabs = settingsButtons.map(button => button.dataset.settingsTab);
-  const showSettingsTab = (name, updateHash = true) => {
-    const tab = allowedTabs.includes(name) ? name : 'general';
-    settingsButtons.forEach(button => button.classList.toggle('active', button.dataset.settingsTab === tab));
-    settingsPanels.forEach(panel => { panel.hidden = panel.dataset.settingsPanel !== tab; });
-    if (updateHash) history.replaceState(null, '', `#${tab}`);
-  };
-  settingsButtons.forEach(button => button.addEventListener('click', () => showSettingsTab(button.dataset.settingsTab)));
-  const initial = location.hash.slice(1) || page.dataset.activeSettingsTab;
-  showSettingsTab(initial, false);
-
-  const bindTabs = (buttonSelector, panelSelector, buttonProperty, panelProperty) => {
-    const buttons = [...document.querySelectorAll(buttonSelector)];
-    const panels = [...document.querySelectorAll(panelSelector)];
-    buttons.forEach(button => button.addEventListener('click', () => {
-      buttons.forEach(item => item.classList.toggle('active', item.dataset[buttonProperty] === button.dataset[buttonProperty]));
-      panels.forEach(panel => { panel.hidden = panel.dataset[panelProperty] !== button.dataset[buttonProperty]; });
-    }));
-  };
-  bindTabs('[data-subtab]', '[data-subpanel]', 'subtab', 'subpanel');
-  bindTabs('[data-integration-tab]', '[data-integration-panel]', 'integrationTab', 'integrationPanel');
-
-  const copyText = async value => {
-    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(value);
-    const area = document.createElement('textarea'); area.value = value; document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove();
-  };
-  document.addEventListener('click', event => {
-    const button = event.target.closest('[data-copy-target], [data-copy-value]');
-    if (!button) return;
-    const field = button.dataset.copyTarget ? document.getElementById(button.dataset.copyTarget) : null;
-    const value = field ? field.value : button.dataset.copyValue;
-    copyText(value || '').then(() => {
-      const original = button.textContent; button.textContent = 'Copied';
-      setTimeout(() => { button.textContent = original; }, 1400);
-    });
-  });
-
-  const currencyForm = document.getElementById('currency-settings-form');
-  const refreshReward = () => {
-    if (!currencyForm) return;
-    const rate = Number(currencyForm.querySelector('[name="currency_multiplier"]').value || 0);
-    const share = Number(currencyForm.querySelector('[name="user_revenue_share"]').value || 0) / 100;
-    const precision = Number(currencyForm.querySelector('[name="reward_rounding_precision"]').value || 2);
-    document.getElementById('reward-simulation').textContent = (rate * share).toFixed(precision);
-    document.getElementById('reward-simulation-currency').textContent = currencyForm.querySelector('[name="currency_name"]').value || 'Points';
-  };
-  currencyForm?.addEventListener('input', refreshReward); currencyForm?.addEventListener('change', refreshReward); refreshReward();
+  const page=document.querySelector('.ow-ou-settings'); const buttons=[...document.querySelectorAll('[data-settings-tab]')]; const panels=[...document.querySelectorAll('[data-settings-panel]')];
+  const show=name=>{if(!buttons.some(b=>b.dataset.settingsTab===name))name='general';buttons.forEach(b=>b.classList.toggle('active',b.dataset.settingsTab===name));panels.forEach(p=>p.hidden=p.dataset.settingsPanel!==name);history.replaceState(null,'',`#${name}`)};
+  buttons.forEach(b=>b.addEventListener('click',()=>show(b.dataset.settingsTab))); show(location.hash.slice(1)||page.dataset.activeSettingsTab);
+  document.querySelectorAll('[data-next-tab]').forEach(b=>b.addEventListener('click',()=>show(b.dataset.nextTab)));
+  document.querySelectorAll('[data-postback-tab]').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('[data-postback-tab]').forEach(b=>b.classList.toggle('active',b===button));document.querySelectorAll('[data-postback-panel]').forEach(p=>p.hidden=p.dataset.postbackPanel!==button.dataset.postbackTab)}));
+  document.querySelector('[data-clear-postback]')?.addEventListener('click',()=>{document.querySelector('[name="postback_url"]').value=''});
+  const read=id=>{const node=document.getElementById(id);return 'value' in node?node.value:node.textContent}; const copy=async value=>{if(navigator.clipboard&&isSecureContext)return navigator.clipboard.writeText(value);const t=document.createElement('textarea');t.value=value;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()};
+  document.addEventListener('click',event=>{const b=event.target.closest('[data-copy-target]');if(!b)return;copy(read(b.dataset.copyTarget)).then(()=>{const old=b.textContent;b.textContent='Copied';setTimeout(()=>b.textContent=old,1200)})});
+  document.querySelectorAll('[data-scroll-target]').forEach(b=>b.addEventListener('click',()=>document.getElementById(b.dataset.scrollTarget).scrollIntoView({behavior:'smooth',block:'start'})));
+  const form=document.getElementById('currency-settings-form'); const refresh=()=>{if(!form)return;const rate=Number(form.currency_multiplier.value||0),share=Number(form.user_revenue_share.value||0),precision=Number(form.reward_rounding_precision.value||2),currency=form.currency_name.value||'Points',result=(rate*share/100).toFixed(precision);document.getElementById('sim-rate').textContent=rate;document.getElementById('sim-share').textContent=`${share}%`;document.getElementById('sim-result').textContent=result;document.getElementById('sim-currency-a').textContent=currency;document.getElementById('sim-currency-b').textContent=currency;document.getElementById('sim-sentence').textContent=`${result} ${currency}`}; form?.addEventListener('input',refresh);form?.addEventListener('change',refresh);refresh();
 })();
 </script>
 {% endblock %}

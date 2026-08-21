@@ -1,4 +1,3 @@
-import re
 from urllib.parse import urlsplit
 
 from django import forms
@@ -143,6 +142,11 @@ class SupplierSignupForm(forms.Form):
 class PublisherPlacementCreateForm(forms.ModelForm):
     """Small first-step form matching the publisher placement workflow."""
 
+    platform = forms.ChoiceField(
+        choices=(("web", "Web"), ("android", "Android"), ("ios", "iOS")),
+        widget=forms.RadioSelect,
+    )
+
     class Meta:
         model = PublisherPlacement
         fields = ["platform", "website_url"]
@@ -232,42 +236,8 @@ def _validate_brand_image(upload, *, max_bytes):
 class PlacementGeneralForm(forms.ModelForm):
     class Meta:
         model = PublisherPlacement
-        fields = ["traffic_type", "allowed_domains"]
-        widgets = {
-            "traffic_type": forms.RadioSelect,
-            "allowed_domains": forms.Textarea(
-                attrs={"rows": 3, "placeholder": "rewards.example.com\napp.example.com"}
-            ),
-        }
-
-    def clean_allowed_domains(self):
-        raw_value = str(self.cleaned_data.get("allowed_domains") or "")
-        domains = []
-        for raw_domain in re.split(r"[,\s]+", raw_value):
-            value = raw_domain.strip().lower().removeprefix("*.")
-            if not value:
-                continue
-            parsed = urlsplit(value if "://" in value else f"//{value}")
-            try:
-                hostname = parsed.hostname
-                port = parsed.port
-            except ValueError as exc:
-                raise ValidationError("Enter domains only, such as rewards.example.com.") from exc
-            if (
-                parsed.scheme not in {"", "http", "https"}
-                or not hostname
-                or parsed.username
-                or parsed.password
-                or port
-                or (parsed.path and parsed.path != "/")
-                or parsed.query
-                or parsed.fragment
-            ):
-                raise ValidationError("Enter domains only, such as rewards.example.com.")
-            domain = hostname.lower().rstrip(".")
-            if domain not in domains:
-                domains.append(domain)
-        return "\n".join(domains)
+        fields = ["traffic_type"]
+        widgets = {"traffic_type": forms.RadioSelect}
 
 
 class PlacementCurrencyForm(forms.ModelForm):
@@ -280,7 +250,9 @@ class PlacementCurrencyForm(forms.ModelForm):
             "reward_rounding_precision",
         ]
         widgets = {
-            "currency_name": forms.TextInput(attrs={"maxlength": 16, "placeholder": "Points"}),
+            "currency_name": forms.TextInput(
+                attrs={"maxlength": 6, "placeholder": "e.g. Points, Coins, Gems"}
+            ),
             "user_revenue_share": forms.NumberInput(attrs={"min": 0, "max": 100, "step": "0.01"}),
             "currency_multiplier": forms.NumberInput(attrs={"min": "0.000001", "step": "0.000001"}),
         }
@@ -306,33 +278,23 @@ class PlacementPostbackForm(forms.ModelForm):
     class Meta:
         model = PublisherPlacement
         fields = [
-            "postback_enabled",
             "postback_url",
             "whitelist_postback_ip",
             "postback_email_opt_out",
-            "respondent_id_parameter",
-            "campaign_id_parameter",
-            "affiliate_sub_parameter",
         ]
 
     def clean_postback_url(self):
         return _clean_https_url_template(
             self.cleaned_data.get("postback_url"),
-            required=bool(self.cleaned_data.get("postback_enabled")),
+            required=False,
         )
 
-    def clean(self):
-        cleaned = super().clean()
-        parameter_fields = (
-            "respondent_id_parameter",
-            "campaign_id_parameter",
-            "affiliate_sub_parameter",
-        )
-        values = [str(cleaned.get(field) or "").casefold() for field in parameter_fields]
-        if all(values) and len(set(values)) != len(values):
-            raise ValidationError("Each variable mapping must use a different parameter name.")
-        return cleaned
-
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.postback_enabled = bool(instance.postback_url)
+        if commit:
+            instance.save()
+        return instance
 
 class PlacementDesignForm(forms.ModelForm):
     CONTENT_CHOICES = (
@@ -361,10 +323,14 @@ class PlacementDesignForm(forms.ModelForm):
 
 
 class PlacementEventPostbackForm(forms.ModelForm):
+    event_type = forms.ChoiceField(
+        choices=(("complete", "Completed"), ("reversal", "Reversal")),
+        label="Event",
+    )
     survey_id = forms.CharField(
-        required=False,
-        label="Survey ID",
-        widget=forms.TextInput(attrs={"placeholder": "Optional internal survey ID"}),
+        required=True,
+        label="Offer",
+        widget=forms.TextInput(attrs={"placeholder": "Search offer by name or ID"}),
     )
     callback_url = forms.CharField(
         widget=forms.TextInput(
@@ -374,7 +340,7 @@ class PlacementEventPostbackForm(forms.ModelForm):
 
     class Meta:
         model = PlacementEventPostback
-        fields = ["event_type", "event_name", "callback_url"]
+        fields = ["event_type", "callback_url"]
 
     def __init__(self, *args, placement=None, **kwargs):
         self.placement = placement
@@ -383,7 +349,7 @@ class PlacementEventPostbackForm(forms.ModelForm):
     def clean_survey_id(self):
         value = str(self.cleaned_data.get("survey_id") or "").strip()
         if not value:
-            return None
+            raise ValidationError("Select an offer.")
         survey = Survey.objects.filter(local_id=value).first()
         if not survey:
             raise ValidationError("No survey exists with this internal survey ID.")
@@ -412,132 +378,9 @@ class PlacementEventPostbackForm(forms.ModelForm):
         instance = super().save(commit=False)
         instance.placement = self.placement
         instance.survey = self.cleaned_data.get("survey_id")
+        instance.event_name = dict(self.fields["event_type"].choices).get(
+            instance.event_type, instance.event_type
+        )
         if commit:
             instance.save()
         return instance
-
-
-class PublisherPlacementForm(forms.ModelForm):
-    class Meta:
-        model = PublisherPlacement
-        fields = [
-            "platform",
-            "name",
-            "website_name",
-            "website_url",
-            "allowed_domains",
-            "postback_enabled",
-            "postback_url",
-            "currency",
-            "currency_multiplier",
-            "respondent_id_parameter",
-            "campaign_id_parameter",
-            "affiliate_sub_parameter",
-        ]
-        labels = {
-            "postback_url": "Base postback URL",
-            "allowed_domains": "Additional allowed domains",
-            "respondent_id_parameter": "Respondent ID variable",
-            "campaign_id_parameter": "Campaign ID variable",
-            "affiliate_sub_parameter": "Affiliate sub variable",
-        }
-        widgets = {
-            "name": forms.TextInput(attrs={"placeholder": "e.g. Main rewards wall"}),
-            "website_name": forms.TextInput(attrs={"placeholder": "e.g. My Rewards App"}),
-            "website_url": forms.URLInput(attrs={"placeholder": "https://example.com"}),
-            "postback_url": forms.URLInput(
-                attrs={"placeholder": "https://example.com/postback (optional)"}
-            ),
-            "allowed_domains": forms.Textarea(
-                attrs={
-                    "placeholder": "rewards.example.com\napp.example.com",
-                    "rows": 3,
-                }
-            ),
-            "currency": forms.TextInput(attrs={"placeholder": "USD", "maxlength": 3}),
-            "currency_multiplier": forms.NumberInput(
-                attrs={"step": "0.000001", "min": "0.000001"}
-            ),
-            "respondent_id_parameter": forms.TextInput(attrs={"placeholder": "uid"}),
-            "campaign_id_parameter": forms.TextInput(attrs={"placeholder": "campaign_id"}),
-            "affiliate_sub_parameter": forms.TextInput(attrs={"placeholder": "subid"}),
-        }
-
-    def __init__(self, *args, publisher=None, **kwargs):
-        self.publisher = publisher
-        super().__init__(*args, **kwargs)
-
-    def clean_currency(self):
-        currency = str(self.cleaned_data.get("currency") or "").strip().upper()
-        if not re.fullmatch(r"[A-Z]{3}", currency):
-            raise ValidationError("Enter a three-letter currency code such as USD.")
-        return currency
-
-    def clean_website_url(self):
-        return self._secure_url("website_url", required=True)
-
-    def clean_postback_url(self):
-        return self._secure_url("postback_url", required=False)
-
-    def clean_allowed_domains(self):
-        raw_value = str(self.cleaned_data.get("allowed_domains") or "")
-        domains = []
-        for raw_domain in re.split(r"[,\s]+", raw_value):
-            value = raw_domain.strip().lower()
-            if not value:
-                continue
-            value = value.removeprefix("*.")
-            parsed = urlsplit(value if "://" in value else f"//{value}")
-            try:
-                hostname = parsed.hostname
-                port = parsed.port
-            except ValueError as exc:
-                raise ValidationError(
-                    "Enter domains only, such as rewards.example.com."
-                ) from exc
-            if (
-                parsed.scheme not in {"", "http", "https"}
-                or not hostname
-                or parsed.username
-                or parsed.password
-                or port
-                or (parsed.path and parsed.path != "/")
-                or parsed.query
-                or parsed.fragment
-            ):
-                raise ValidationError("Enter domains only, such as rewards.example.com.")
-            domain = hostname.lower().rstrip(".")
-            if domain not in domains:
-                domains.append(domain)
-        return "\n".join(domains)
-
-    def _secure_url(self, field_name, *, required):
-        value = str(self.cleaned_data.get(field_name) or "").strip()
-        if not value and not required:
-            return ""
-        if not value.lower().startswith("https://"):
-            raise ValidationError("Use an HTTPS URL.")
-        return value
-
-    def clean(self):
-        cleaned = super().clean()
-        parameter_fields = (
-            "respondent_id_parameter",
-            "campaign_id_parameter",
-            "affiliate_sub_parameter",
-        )
-        values = [str(cleaned.get(field) or "").casefold() for field in parameter_fields]
-        if all(values) and len(set(values)) != len(values):
-            raise ValidationError("Each variable mapping must use a different parameter name.")
-        if cleaned.get("postback_enabled") and not cleaned.get("postback_url"):
-            self.add_error("postback_url", "Enter a postback URL before enabling callbacks.")
-        if self.publisher and cleaned.get("name"):
-            duplicate = PublisherPlacement.objects.filter(
-                publisher=self.publisher,
-                name__iexact=str(cleaned["name"]).strip(),
-            )
-            if self.instance.pk:
-                duplicate = duplicate.exclude(pk=self.instance.pk)
-            if duplicate.exists():
-                self.add_error("name", "You already have a placement with this name.")
-        return cleaned

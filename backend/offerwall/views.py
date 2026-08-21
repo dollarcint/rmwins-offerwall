@@ -2,7 +2,6 @@
 
 import hashlib
 import hmac
-import json
 import mimetypes
 import re
 import secrets
@@ -21,6 +20,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, DecimalField, Q, Sum, Value
 from django.db.models.functions import Coalesce
+from django.core.paginator import Paginator
 from django.http import FileResponse, Http404, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
@@ -43,7 +43,6 @@ from .forms import (
     PlacementGeneralForm,
     PlacementPostbackForm,
     PublisherPlacementCreateForm,
-    PublisherPlacementForm,
     SupplierLoginForm,
     SupplierSignupForm,
 )
@@ -59,15 +58,13 @@ from .models import (
     WallVisit,
 )
 from .security import (
+    decrypt_api_key,
     decrypt_placement_postback_secret,
     digest_api_key,
     generate_signing_secret,
-    postback_signature,
-    sign_placement_access,
     verify_click_signature,
     verify_entry_signature,
     verify_portal_access,
-    verify_placement_access,
     verify_result_signature,
     verify_session_signature,
 )
@@ -385,6 +382,7 @@ def offerwall_operations_action(request):
             publisher.save(
                 update_fields=[
                     "api_key_hash",
+                    "encrypted_api_key",
                     "api_key_prefix",
                     "api_key_last_four",
                     "api_key_changed_at",
@@ -686,51 +684,143 @@ def offers_api(request):
         return _no_store(JsonResponse({"error": "Rate limit exceeded."}, status=429))
     publisher = _publisher_from_api_key(request)
     if not publisher:
-        return _no_store(JsonResponse({"error": "Invalid Offerwall API key."}, status=401))
-    external_user_id = str(
-        request.GET.get("uid") or request.GET.get("SID") or ""
-    ).strip()
-    if not USER_ID_RE.fullmatch(external_user_id):
-        return _no_store(JsonResponse({"error": "A valid uid is required."}, status=400))
+        return _no_store(
+            JsonResponse(
+                {"message": "Invalid API key.", "type": 0, "code": 401}, status=401
+            )
+        )
+    pubid = str(request.GET.get("pubid") or "").strip()
+    if pubid != str(publisher.public_id):
+        return _no_store(
+            JsonResponse(
+                {"message": "A valid pubid is required.", "type": 0, "code": 400},
+                status=400,
+            )
+        )
     try:
         placement = _placement_from_app_id(publisher, request.GET.get("app_id"))
     except ValueError as exc:
-        return _no_store(JsonResponse({"error": str(exc)}, status=400))
-    visit = create_api_visit(
-        publisher,
-        external_user_id=external_user_id,
-        request=request,
+        return _no_store(
+            JsonResponse({"message": str(exc), "type": 0, "code": 400}, status=400)
+        )
+    if not placement:
+        return _no_store(
+            JsonResponse(
+                {"message": "A valid app_id is required.", "type": 0, "code": 400},
+                status=400,
+            )
+        )
+    country = str(request.GET.get("country") or "All").strip().upper()
+    platform = str(request.GET.get("platform") or "All").strip()
+    device = "" if platform.casefold() == "all" else platform
+    visit = WallVisit(
+        public_id=uuid.uuid4(),
+        publisher=publisher,
+        external_user_id="{SID}",
         placement=placement,
-        external_campaign_id=request.GET.get("campaign_id", ""),
-        affiliate_sub_id=request.GET.get("sid2", ""),
+        country_code="" if country == "ALL" else country,
+        device=device,
     )
     offers = offer_catalog(publisher, visit)
-    response_offers = [
-        {
-            **item,
-            "reward": str(item["reward"] if item["reward"] is not None else Decimal("0.00")),
-            "incidence_rate": str(item["incidence_rate"]) if item["incidence_rate"] is not None else None,
-            "click_url": request.build_absolute_uri(item["click_url"]),
-        }
-        for item in offers
-    ]
+    response_offers = []
+    for item in offers:
+        tracking_path = reverse("offerwall:offer-click-tracking")
+        tracking_url = request.build_absolute_uri(tracking_path)
+        tracking_url = (
+            f"{tracking_url}?app_id={placement.app_id}&offer_id={item['id']}"
+            "&uid={SID}&sid={YOUR_CLICK_ID}&sid2={YOUR_SOURCE_ID}"
+        )
+        payout = item["reward"] if item["reward"] is not None else Decimal("0.00")
+        response_offers.append(
+            {
+                "offer_id": item["id"],
+                "offer_name": item["title"],
+                "offer_desc": None,
+                "kpi": None,
+                "traffic_type": placement.traffic_type,
+                "call_to_action": "Complete the survey honestly to earn your reward.",
+                "offer_url_easy": tracking_url,
+                "payout": float(payout),
+                "offer_type": item["survey_type"] or "Survey",
+                "channel": "Wall",
+                "payoutType": "flat",
+                "amount": float(payout),
+                "image_url": "",
+                "countries": item["country"] or "All",
+                "devices": item["device"] or "All",
+                "preview_url": "",
+                "events": [],
+                "loi": item["loi"],
+                "ir": (
+                    float(item["incidence_rate"])
+                    if item["incidence_rate"] is not None
+                    else None
+                ),
+            }
+        )
     return _no_store(
         JsonResponse(
             {
-                "publisher": {
-                    "name": publisher.name,
-                    "slug": publisher.slug,
-                    "currency": (
-                        placement.currency_name if placement else publisher.currency
-                    ),
+                "message": "success",
+                "type": 1,
+                "code": 200,
+                "data": {
+                    "query": {
+                        "pubid": pubid,
+                        "appid": placement.app_id,
+                        "country": country.title() if country == "ALL" else country,
+                        "platform": platform,
+                    },
+                    "response": {
+                        "currency_name": placement.currency_name,
+                        "offers": response_offers,
+                    },
                 },
-                "app_id": placement.app_id if placement else "",
-                "user_id": external_user_id,
-                "session_url": session_url(visit),
-                "expires_at": visit.expires_at.isoformat(),
-                "offers": response_offers,
             }
         )
+    )
+
+
+@require_GET
+def offer_click_tracking(request):
+    app_id = str(request.GET.get("app_id") or "").strip()
+    if not re.fullmatch(r"ID_[0-9a-fA-F]{32}", app_id):
+        return _error(request, "Invalid placement", "A valid app_id is required.")
+    placement = get_object_or_404(
+        PublisherPlacement.objects.select_related("publisher"),
+        public_id=uuid.UUID(hex=app_id[3:]),
+        status=PublisherPlacement.Status.ACTIVE,
+        publisher__is_active=True,
+    )
+    external_user_id = str(
+        request.GET.get("uid") or request.GET.get("SID") or ""
+    ).strip()
+    if (
+        not USER_ID_RE.fullmatch(external_user_id)
+        or "{" in external_user_id
+        or "}" in external_user_id
+    ):
+        return _error(request, "Invalid respondent", "A valid uid is required.")
+    survey = get_object_or_404(Survey, local_id=request.GET.get("offer_id"))
+    visit = create_api_visit(
+        placement.publisher,
+        external_user_id=external_user_id,
+        request=request,
+        placement=placement,
+        external_campaign_id=request.GET.get("sid", ""),
+        affiliate_sub_id=request.GET.get("sid2", ""),
+        affiliate_sub_id_3=request.GET.get("sid3", ""),
+        affiliate_sub_id_4=request.GET.get("sid4", ""),
+        affiliate_sub_id_5=request.GET.get("sid5", ""),
+        idfa=request.GET.get("idfa", ""),
+        gaid=request.GET.get("gaid", ""),
+    )
+    try:
+        click, _ = create_offer_click(visit=visit, survey=survey, request=request)
+    except ValueError as exc:
+        return _error(request, "Offer unavailable", str(exc), status=409)
+    return _no_store(
+        HttpResponseRedirect(f"{reverse('survey-start')}?rid={click.attempt.rid}")
     )
 
 
@@ -826,6 +916,7 @@ def _publisher_portal_or_response(request):
 def _supplier_portal_context(publisher, active_page):
     return {
         "portal_publisher": publisher,
+        "portal_wallet": wallet_summary(publisher),
         "supplier_portal_enabled": True,
         "supplier_active_page": active_page,
     }
@@ -835,41 +926,32 @@ def _placement_embed_details(request, placement):
     base_url = request.build_absolute_uri(
         reverse("offerwall:placement-embed", kwargs={"placement_id": placement.public_id})
     )
-    iframe_url = (
-        f"{base_url}?{placement.respondent_id_parameter}={{SID}}"
-        f"&{placement.campaign_id_parameter}={{CAMPAIGN_ID}}"
-        f"&{placement.affiliate_sub_parameter}={{SID2}}"
-    )
-    direct_url = f"{iframe_url}&access={sign_placement_access(placement)}"
+    iframe_url = f"{base_url}?SID={{SID}}"
     api_url = request.build_absolute_uri(reverse("offerwall:offers-api"))
     placement.embed_preview_url = base_url
-    placement.direct_url = direct_url
+    placement.direct_url = iframe_url
     placement.api_url = api_url
     placement.api_example_url = (
-        f"{api_url}?key={{API_KEY}}&app_id={placement.app_id}&uid={{SID}}"
+        f"{api_url}?key={{API_KEY}}&pubid={placement.publisher.public_id}"
+        f"&app_id={placement.app_id}&platform=All&country=All&type=live_surveys"
     )
     placement.iframe_code = (
-        f'<iframe src="{iframe_url}" title="RM Wins survey offerwall" '
-        'allow="clipboard-write" width="100%" height="800" '
-        'style="border:0;min-height:800px" scrolling="auto" frameborder="0" '
-        'loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe>'
+        f'<iframe src="{iframe_url}" title="RM Wins Offer Wall" '
+        'allow="clipboard-write" width="100%" height="800px" '
+        'style="border:0; min-height:800px;" scrolling="auto" frameborder="0">'
+        '</iframe>\n'
+        f'<a href="{iframe_url}" target="_blank">'
+        'iFrames are required to see this page. Please click here!</a>'
     )
     return placement
 
 
-def _remember_placement_secret(request, placement):
-    raw_secret = getattr(placement, "_generated_postback_secret", "")
-    if raw_secret:
-        request.session["offerwall_placement_secret_once"] = {
-            "placement_id": str(placement.public_id),
-            "secret": raw_secret,
-        }
-
-
 def _publisher_placements_response(request, publisher, *, form):
     money_field = DecimalField(max_digits=14, decimal_places=2)
-    placements = list(
-        publisher.placements.annotate(
+    placement_queryset = (
+        publisher.placements.exclude(
+            status=PublisherPlacement.Status.ARCHIVED
+        ).annotate(
             visit_count=Count("visits", distinct=True),
             click_count=Count("visits__clicks", distinct=True),
             complete_count=Count(
@@ -900,18 +982,24 @@ def _publisher_placements_response(request, publisher, *, form):
                 Value(Decimal("0.00"), output_field=money_field),
                 output_field=money_field,
             ),
-        )
+        ).order_by("-created_at")
     )
+    paginator = Paginator(placement_queryset, 10)
+    placements = paginator.get_page(request.GET.get("page"))
     for placement in placements:
         placement.total_revenue = placement.credit_revenue - placement.reversal_revenue
+        website = urlparse(placement.website_url)
+        placement.favicon_url = (
+            f"{website.scheme}://{website.netloc}/favicon.ico"
+            if website.scheme and website.netloc
+            else ""
+        )
     context = _supplier_portal_context(publisher, "placements")
     context.update(
         {
             "form": form,
             "placements": placements,
-            "active_placements": sum(
-                item.status == PublisherPlacement.Status.ACTIVE for item in placements
-            ),
+            "placement_total": paginator.count,
         }
     )
     return _no_store(render(request, "offerwall/publisher_placements.html", context))
@@ -928,7 +1016,6 @@ def publisher_placements(request):
     )
     if request.method == "POST" and form.is_valid():
         placement = form.save()
-        _remember_placement_secret(request, placement)
         messages.success(
             request,
             f"Placement “{placement.name}” created. Open Settings to complete its integration.",
@@ -974,26 +1061,7 @@ def publisher_placement_edit(request, placement_id):
             )
             return _no_store(HttpResponseRedirect(f"{destination}#{form_type}"))
     elif request.method == "POST":
-        # Backwards-compatible full update for old clients; the portal itself
-        # uses the scoped settings forms above.
-        legacy_form = PublisherPlacementForm(
-            request.POST,
-            instance=placement,
-            publisher=publisher,
-        )
-        if legacy_form.is_valid():
-            legacy_form.save()
-            messages.success(request, f"Placement “{placement.name}” updated.")
-            return _no_store(
-                HttpResponseRedirect(
-                    reverse(
-                        "offerwall:publisher-placement-edit",
-                        kwargs={"placement_id": placement.public_id},
-                    )
-                )
-            )
-        bound_forms["general"] = legacy_form
-        form_type = "general"
+        raise Http404
     return _publisher_placement_settings_response(
         request,
         publisher,
@@ -1014,12 +1082,8 @@ def _publisher_placement_settings_response(
 ):
     bound_forms = bound_forms or {}
     _placement_embed_details(request, placement)
-    revealed = request.session.pop("offerwall_placement_secret_once", None)
-    if revealed and revealed.get("placement_id") == str(placement.public_id):
-        placement.revealed_postback_secret = revealed.get("secret", "")
-    revealed_api = request.session.pop("offerwall_api_key_once", None)
-    if revealed_api and revealed_api.get("publisher_id") == str(publisher.public_id):
-        placement.revealed_api_key = revealed_api.get("key", "")
+    placement.postback_secret_plain = decrypt_placement_postback_secret(placement)
+    placement.api_key_plain = decrypt_api_key(publisher)
     if placement.currency_icon:
         placement.currency_icon_public_url = reverse(
             "offerwall:placement-brand-asset",
@@ -1042,8 +1106,6 @@ def _publisher_placement_settings_response(
             or PlacementPostbackForm(instance=placement),
             "design_form": bound_forms.get("design")
             or PlacementDesignForm(instance=placement),
-            "event_form": event_form
-            or PlacementEventPostbackForm(placement=placement),
             "event_postbacks": placement.event_postbacks.select_related("survey"),
             "active_settings_tab": active_tab,
             "postback_source_ip": getattr(
@@ -1056,7 +1118,7 @@ def _publisher_placement_settings_response(
     )
 
 
-@require_POST
+@require_http_methods(["GET", "POST"])
 def publisher_placement_event_postback_add(request, placement_id):
     publisher, denied = _publisher_portal_or_response(request)
     if denied:
@@ -1064,8 +1126,15 @@ def publisher_placement_event_postback_add(request, placement_id):
     placement = get_object_or_404(
         PublisherPlacement, publisher=publisher, public_id=placement_id
     )
-    form = PlacementEventPostbackForm(request.POST, placement=placement)
-    if form.is_valid():
+    form = PlacementEventPostbackForm(
+        request.POST or None,
+        placement=placement,
+    )
+    if request.method == "POST" and form.is_valid():
+        placement.postback_email_opt_out = bool(
+            request.POST.get("postback_email_opt_out")
+        )
+        placement.save(update_fields=["postback_email_opt_out", "updated_at"])
         form.save()
         messages.success(request, "Specific event postback added.")
         destination = reverse(
@@ -1073,12 +1142,22 @@ def publisher_placement_event_postback_add(request, placement_id):
             kwargs={"placement_id": placement.public_id},
         )
         return _no_store(HttpResponseRedirect(f"{destination}#postback"))
-    return _publisher_placement_settings_response(
-        request,
-        publisher,
-        placement,
-        event_form=form,
-        active_tab="postback",
+    context = _supplier_portal_context(publisher, "placements")
+    context.update(
+        {
+            "placement": placement,
+            "event_form": form,
+            "survey_options": Survey.objects.filter(status=Survey.Status.LIVE)
+            .only("local_id", "name")
+            .order_by("name", "local_id"),
+            "postback_source_ip": getattr(
+                settings, "OFFERWALL_POSTBACK_SOURCE_IP", "Not fixed"
+            ),
+            "postback_secret": decrypt_placement_postback_secret(placement),
+        }
+    )
+    return _no_store(
+        render(request, "offerwall/publisher_placement_postback_create.html", context)
     )
 
 
@@ -1121,49 +1200,41 @@ def publisher_placement_postback_test(request, placement_id):
     if not placement.postback_enabled or not placement.postback_url:
         messages.error(request, "Enable postbacks and save a URL before testing.")
     else:
-        event_id = f"test-{secrets.token_hex(8)}"
         payload = {
-            "event": "test",
-            "event_id": event_id,
-            "placement_id": str(placement.public_id),
             "app_id": placement.app_id,
-            "status": "test",
-            "occurred_at": timezone.now().isoformat(),
+            "user_id": "test-user",
+            "offer_id": "test-offer",
+            "status": "1",
+            "reward_amount": "1.00",
+            "payout_amount": "1.00",
+            "transaction_id": f"test-{secrets.token_hex(8)}",
+            "event_id": "test-event",
+            "event": "test",
         }
-        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-        timestamp = int(timezone.now().timestamp())
         signing_secret = decrypt_placement_postback_secret(placement)
-        signature = postback_signature(
-            signing_secret,
-            timestamp=timestamp,
-            event_id=event_id,
-            body=body,
-        )
         try:
             callback_url = _render_postback_url(placement.postback_url, payload)
             transaction_signature = hmac.new(
-                signing_secret.encode("utf-8"), b"", hashlib.sha256
+                signing_secret.encode("utf-8"),
+                payload["transaction_id"].encode("utf-8"),
+                hashlib.sha256,
             ).hexdigest()
             callback_url = _validated_callback_url(
                 callback_url.replace("{SIG}", transaction_signature)
             )
-            response = requests.post(
+            response = requests.get(
                 callback_url,
-                data=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "User-Agent": "RMWins-Offerwall-Test/1.0",
-                    "X-Offerwall-Event": event_id,
-                    "X-Offerwall-Timestamp": str(timestamp),
-                    "X-Offerwall-Signature": f"sha256={signature}",
-                },
+                headers={"User-Agent": "RMWins-Offerwall-Test/1.0"},
                 timeout=settings.OFFERWALL_POSTBACK_TIMEOUT_SECONDS,
                 allow_redirects=False,
             )
-            if 200 <= response.status_code < 300:
-                messages.success(request, f"Test postback accepted with HTTP {response.status_code}.")
+            if 200 <= response.status_code < 300 and response.text.strip() == "1":
+                messages.success(request, "Postback connection successful. Response body: 1")
             else:
-                messages.error(request, f"Postback endpoint returned HTTP {response.status_code}.")
+                messages.error(
+                    request,
+                    f'Postback must return body "1" (HTTP {response.status_code}).',
+                )
         except Exception as exc:
             messages.error(request, f"Postback test failed: {str(exc)[:180]}")
     destination = reverse(
@@ -1208,15 +1279,10 @@ def publisher_placement_action(request, placement_id):
         public_id=placement_id,
     )
     action = str(request.POST.get("action") or "").strip()
-    transitions = {
-        "activate": PublisherPlacement.Status.ACTIVE,
-        "pause": PublisherPlacement.Status.PAUSED,
-        "archive": PublisherPlacement.Status.ARCHIVED,
-    }
-    if action in transitions:
-        placement.status = transitions[action]
-        placement.save(update_fields=["status", "updated_at"])
-        messages.success(request, f"Placement “{placement.name}” is now {placement.get_status_display().lower()}.")
+    if action == "delete":
+        placement_name = placement.website_name
+        placement.delete()
+        messages.success(request, f"Placement “{placement_name}” deleted.")
     elif action == "rotate-postback-secret":
         placement.set_postback_secret(generate_signing_secret())
         placement.save(
@@ -1227,13 +1293,13 @@ def publisher_placement_action(request, placement_id):
                 "updated_at",
             ]
         )
-        _remember_placement_secret(request, placement)
-        messages.success(request, "A new postback signing key was generated. Copy it now.")
+        messages.success(request, "Postback secret reset successfully.")
     elif action == "rotate-api-key":
         raw_key = publisher.rotate_api_key()
         publisher.save(
             update_fields=[
                 "api_key_hash",
+                "encrypted_api_key",
                 "api_key_prefix",
                 "api_key_last_four",
                 "api_key_changed_at",
@@ -1241,11 +1307,7 @@ def publisher_placement_action(request, placement_id):
                 "updated_at",
             ]
         )
-        request.session["offerwall_api_key_once"] = {
-            "publisher_id": str(publisher.public_id),
-            "key": raw_key,
-        }
-        messages.success(request, "A new API key was generated. Copy it now.")
+        messages.success(request, "A new API key was generated.")
     else:
         raise Http404
     destination = reverse("offerwall:publisher-placements")
@@ -1259,13 +1321,9 @@ def publisher_placement_action(request, placement_id):
 
 
 SUPPLIER_SECTION_COPY = {
-    "respondents": (
-        "Respondents",
-        "Respondent activity, unique users and engagement details will live here.",
-    ),
-    "survey-results": (
-        "Survey results",
-        "Completion, termination and quota outcomes will be available here.",
+    "offers": (
+        "Offers",
+        "Browse the offers and surveys available for your placements.",
     ),
     "general-details": (
         "General details",
@@ -1275,13 +1333,9 @@ SUPPLIER_SECTION_COPY = {
         "Reports",
         "Downloadable traffic, conversion and earnings reports are coming next.",
     ),
-    "leads": (
-        "Leads",
-        "Lead events and qualification details will be available here.",
-    ),
-    "open-answers": (
-        "Open-ended answers",
-        "Open-text response exports will be available here when enabled.",
+    "developer-docs": (
+        "Developer Docs",
+        "Integration documentation is available inside each placement's Integrations tab.",
     ),
 }
 
@@ -1297,32 +1351,6 @@ def publisher_section(request, section):
     context = _supplier_portal_context(publisher, section)
     context.update({"section_title": title, "section_description": description})
     return _no_store(render(request, "offerwall/publisher_placeholder.html", context))
-
-
-def _placement_referrer_allowed(placement, request):
-    referer = str(request.headers.get("Referer") or "").strip()
-    if not referer:
-        return False
-    referer_host = str(urlparse(referer).hostname or "").lower()
-    referer_host = referer_host.removeprefix("www.")
-    allowed_hosts = {
-        str(urlparse(placement.website_url).hostname or "").lower().removeprefix("www."),
-        *(
-            str(item or "").lower().removeprefix("www.")
-            for item in placement.allowed_domain_list
-        ),
-    }
-    return bool(
-        referer_host
-        and any(
-            allowed_host
-            and (
-                referer_host == allowed_host
-                or referer_host.endswith(f".{allowed_host}")
-            )
-            for allowed_host in allowed_hosts
-        )
-    )
 
 
 @xframe_options_exempt
@@ -1341,7 +1369,9 @@ def placement_embed(request, placement_id):
         publisher__is_active=True,
     )
     external_user_id = str(
-        request.GET.get(placement.respondent_id_parameter) or ""
+        request.GET.get("SID")
+        or request.GET.get(placement.respondent_id_parameter)
+        or ""
     ).strip()
     if (
         not external_user_id
@@ -1357,16 +1387,6 @@ def placement_embed(request, placement_id):
         return _no_store(response)
     if not USER_ID_RE.fullmatch(external_user_id):
         return _error(request, "Invalid respondent ID", "Use a valid respondent identifier.")
-    if not (
-        _placement_referrer_allowed(placement, request)
-        or verify_placement_access(placement, request.GET.get("access", ""))
-    ):
-        return _error(
-            request,
-            "Placement domain mismatch",
-            "This placement is not authorized for the referring website.",
-            status=403,
-        )
     visit = create_api_visit(
         placement.publisher,
         external_user_id=external_user_id,
@@ -1374,6 +1394,11 @@ def placement_embed(request, placement_id):
         placement=placement,
         external_campaign_id=request.GET.get(placement.campaign_id_parameter, ""),
         affiliate_sub_id=request.GET.get(placement.affiliate_sub_parameter, ""),
+        affiliate_sub_id_3=request.GET.get("sid3", ""),
+        affiliate_sub_id_4=request.GET.get("sid4", ""),
+        affiliate_sub_id_5=request.GET.get("sid5", ""),
+        idfa=request.GET.get("idfa", ""),
+        gaid=request.GET.get("gaid", ""),
     )
     return _no_store(HttpResponseRedirect(session_url(visit)))
 
@@ -1473,4 +1498,3 @@ def wallet_api(request):
             }
         )
     )
-    postback_signature,

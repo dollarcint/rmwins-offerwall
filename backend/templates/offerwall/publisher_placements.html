@@ -1,141 +1,65 @@
 {% extends 'offerwall/base.html' %}
 {% block title %}Apps / Placements · {{ portal_publisher.name }}{% endblock %}
 {% block content %}
-<section class="ow-apps-page">
+<section class="ow-apps-page ow-ou-placements-page">
   <header class="ow-apps-heading">
-    <div>
-      <span class="ow-eyebrow"><i></i> Distribution</span>
-      <h1>Apps / Placements</h1>
-      <p>Manage your application placements and track revenue.</p>
-    </div>
-    <button class="ow-add-placement" type="button" data-open-placement>
-      <span aria-hidden="true">＋</span> Add Placement
-    </button>
+    <div><h1>Apps / Placements</h1><p>Manage your application placements and track revenue</p></div>
+    <button class="ow-add-placement" type="button" data-open-placement>Add Placement</button>
   </header>
 
-  <section class="ow-apps-table-card" aria-label="Publisher placements">
-    <div class="ow-apps-summary">
-      <div><strong>{{ placements|length }}</strong><span>Total placements</span></div>
-      <div><strong>{{ active_placements }}</strong><span>Active</span></div>
-    </div>
+  <section class="ow-apps-table-card">
     <div class="ow-apps-table-wrap">
       <table class="ow-apps-table">
-        <thead>
-          <tr>
-            <th>Apps / Placement</th>
-            <th>Platform</th>
-            <th>Status</th>
-            <th>Create Date</th>
-            <th>Total Revenue</th>
-            <th class="ow-actions-column">Actions</th>
-          </tr>
-        </thead>
+        <thead><tr><th>Apps / Placement</th><th>Platform</th><th>Status</th><th>Create Date</th><th>Total Revenue</th><th>Actions</th></tr></thead>
         <tbody>
-          {% for placement in placements %}
-          <tr>
-            <td>
-              <div class="ow-app-cell">
-                <span class="ow-app-favicon" aria-hidden="true">{{ placement.website_name|slice:':1'|upper }}</span>
-                <div>
-                  <strong>{{ placement.website_name }}</strong>
-                  <small>ID: {{ placement.app_id }}</small>
-                </div>
-              </div>
-            </td>
-            <td><span class="ow-platform-pill {{ placement.platform }}">{{ placement.get_platform_display }}</span></td>
-            <td><span class="ow-placement-state {{ placement.status }}"><i></i>{{ placement.get_status_display }}</span></td>
+          {% for placement in placements %}<tr>
+            <td><div class="ow-app-cell">
+              {% if placement.favicon_url %}<img class="ow-app-favicon-image" src="{{ placement.favicon_url }}" alt="favicon" loading="lazy">{% else %}<span class="ow-app-favicon">{{ placement.website_name|slice:':1'|upper }}</span>{% endif %}
+              <div><strong>{{ placement.website_name }}</strong><small>ID: {{ placement.app_id }}</small></div>
+            </div></td>
+            <td>{{ placement.get_platform_display }}</td>
+            <td><span class="ow-placement-state {{ placement.status }}">{{ placement.get_status_display }}</span></td>
             <td><time datetime="{{ placement.created_at|date:'c' }}">{{ placement.created_at|date:'F j, Y' }}</time></td>
-            <td><strong class="ow-placement-revenue">{{ placement.currency }} {{ placement.total_revenue|floatformat:2 }}</strong></td>
-            <td class="ow-actions-column">
-              <details class="ow-placement-actions">
-                <summary aria-label="Actions for {{ placement.website_name }}">•••</summary>
-                <div>
-                  <a href="{% url 'offerwall:publisher-placement-edit' placement.public_id %}">Settings</a>
-                  <form method="post" action="{% url 'offerwall:publisher-placement-action' placement.public_id %}">
-                    {% csrf_token %}
-                    {% if placement.status == 'active' %}
-                    <button type="submit" name="action" value="pause">Pause</button>
-                    {% else %}
-                    <button type="submit" name="action" value="activate">Activate</button>
-                    {% endif %}
-                  </form>
-                  {% if placement.status != 'archived' %}
-                  <form method="post" action="{% url 'offerwall:publisher-placement-action' placement.public_id %}">
-                    {% csrf_token %}<button class="danger" type="submit" name="action" value="archive">Archive</button>
-                  </form>
-                  {% endif %}
-                </div>
-              </details>
-            </td>
-          </tr>
-          {% empty %}
-          <tr>
-            <td colspan="6">
-              <div class="ow-apps-empty">
-                <span aria-hidden="true">▣</span>
-                <h2>No placements yet</h2>
-                <p>Add your first website or app placement to generate its integration.</p>
-                <button type="button" data-open-placement>Add Placement</button>
-              </div>
-            </td>
-          </tr>
-          {% endfor %}
+            <td><strong class="ow-placement-revenue">${{ placement.total_revenue|floatformat:2 }}</strong></td>
+            <td><details class="ow-placement-actions"><summary aria-label="Actions for {{ placement.website_name }}">•••</summary><div>
+              <form method="post" action="{% url 'offerwall:publisher-placement-action' placement.public_id %}" onsubmit="return confirm('Delete this placement?');">{% csrf_token %}<button class="danger" type="submit" name="action" value="delete">Delete</button></form>
+              <a href="{% url 'offerwall:publisher-placement-edit' placement.public_id %}">Settings</a>
+            </div></details></td>
+          </tr>{% empty %}<tr><td colspan="6"><div class="ow-apps-empty"><h2>No placements yet</h2><p>Add your first website or app placement.</p><button type="button" data-open-placement>Add Placement</button></div></td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
-    {% if placements %}<footer class="ow-apps-footer">Showing 1 to {{ placements|length }} of {{ placements|length }} results</footer>{% endif %}
+    {% if placement_total %}<footer class="ow-apps-footer">
+      <span>Showing {{ placements.start_index }} to {{ placements.end_index }} of {{ placement_total }} results</span>
+      <nav aria-label="Placement pagination">
+        {% if placements.has_previous %}<a href="?page={{ placements.previous_page_number }}">Previous</a>{% else %}<span>Previous</span>{% endif %}
+        <b>{{ placements.number }}</b>
+        {% if placements.has_next %}<a href="?page={{ placements.next_page_number }}">Next</a>{% else %}<span>Next</span>{% endif %}
+      </nav>
+    </footer>{% endif %}
   </section>
 </section>
 
 <dialog class="ow-placement-modal" id="placement-modal"{% if form.errors %} open{% endif %}>
   <form method="post" class="ow-placement-create-form" novalidate>
     {% csrf_token %}
-    <header>
-      <div><small>New distribution surface</small><h2>Add New Placement</h2></div>
-      <button type="button" class="ow-modal-close" data-close-placement aria-label="Close modal">×</button>
-    </header>
+    <header><h2>Add New Placement</h2><button type="button" class="ow-modal-close" data-close-placement aria-label="Close modal">×</button></header>
     {% if form.non_field_errors %}<div class="ow-field-errors">{{ form.non_field_errors }}</div>{% endif %}
-    <fieldset>
-      <legend>Select Platform</legend>
-      <div class="ow-platform-options">{{ form.platform }}</div>
-      {{ form.platform.errors }}
-    </fieldset>
-    <label class="ow-placement-url-field">
-      <span>Website URL <b>*</b></span>
-      {{ form.website_url }}
-      <small>Use the website, Play Store or App Store URL where this placement will run.</small>
-      {{ form.website_url.errors }}
-    </label>
-    <footer>
-      <button type="button" class="ow-modal-cancel" data-close-placement>Cancel</button>
-      <button type="submit" class="ow-modal-submit">Add</button>
-    </footer>
+    <fieldset><legend>Select Platform</legend><div class="ow-platform-options">{{ form.platform }}</div>{{ form.platform.errors }}</fieldset>
+    <label class="ow-placement-url-field"><span>Website URL <b>*</b></span>{{ form.website_url }}{{ form.website_url.errors }}</label>
+    <footer><button type="button" class="ow-modal-cancel" data-close-placement>Cancel</button><button type="submit" class="ow-modal-submit">Add</button></footer>
   </form>
 </dialog>
-
 <script>
 (() => {
-  const modal = document.getElementById('placement-modal');
-  if (!modal) return;
-  const open = () => {
-    if (typeof modal.showModal === 'function' && !modal.open) modal.showModal();
-    else modal.setAttribute('open', '');
-  };
-  const close = () => {
-    if (typeof modal.close === 'function') modal.close();
-    else modal.removeAttribute('open');
-  };
-  document.querySelectorAll('[data-open-placement]').forEach((button) => button.addEventListener('click', open));
-  document.querySelectorAll('[data-close-placement]').forEach((button) => button.addEventListener('click', close));
-  modal.addEventListener('click', (event) => {
-    if (event.target === modal) close();
-  });
-  document.addEventListener('click', (event) => {
-    document.querySelectorAll('.ow-placement-actions[open]').forEach((menu) => {
-      if (!menu.contains(event.target)) menu.removeAttribute('open');
-    });
-  });
-  if (new URLSearchParams(window.location.search).has('new')) open();
+  const modal=document.getElementById('placement-modal'); if(!modal) return;
+  const open=()=>modal.showModal ? modal.showModal() : modal.setAttribute('open','');
+  const close=()=>modal.close ? modal.close() : modal.removeAttribute('open');
+  document.querySelectorAll('[data-open-placement]').forEach(button=>button.addEventListener('click',open));
+  document.querySelectorAll('[data-close-placement]').forEach(button=>button.addEventListener('click',close));
+  modal.addEventListener('click',event=>{if(event.target===modal) close();});
+  document.addEventListener('click',event=>document.querySelectorAll('.ow-placement-actions[open]').forEach(menu=>{if(!menu.contains(event.target)) menu.removeAttribute('open');}));
+  if(new URLSearchParams(location.search).has('new')) open();
 })();
 </script>
 {% endblock %}

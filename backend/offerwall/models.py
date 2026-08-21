@@ -9,6 +9,7 @@ from django.db import models
 from django.utils import timezone
 
 from .security import (
+    encrypt_api_key,
     encrypt_signing_secret,
     generate_api_key,
     generate_signing_secret,
@@ -74,6 +75,7 @@ class Publisher(models.Model):
     signing_secret_last_four = models.CharField(max_length=4, blank=True, editable=False)
     signing_secret_changed_at = models.DateTimeField(null=True, blank=True, editable=False)
     api_key_hash = models.CharField(max_length=64, blank=True, unique=True, null=True, editable=False)
+    encrypted_api_key = models.TextField(blank=True, editable=False)
     api_key_prefix = models.CharField(max_length=16, blank=True, editable=False)
     api_key_last_four = models.CharField(max_length=4, blank=True, editable=False)
     api_key_changed_at = models.DateTimeField(null=True, blank=True, editable=False)
@@ -111,6 +113,7 @@ class Publisher(models.Model):
     def rotate_api_key(self):
         raw_key, prefix, last_four, key_hash = generate_api_key()
         self.api_key_hash = key_hash
+        self.encrypted_api_key = encrypt_api_key(raw_key)
         self.api_key_prefix = prefix
         self.api_key_last_four = last_four
         self.api_key_changed_at = timezone.now()
@@ -270,7 +273,7 @@ class PublisherPlacement(models.Model):
     postback_secret_last_four = models.CharField(max_length=4, blank=True, editable=False)
     postback_secret_changed_at = models.DateTimeField(null=True, blank=True, editable=False)
     currency = models.CharField(max_length=3, default="USD")
-    currency_name = models.CharField(max_length=16, default="Points")
+    currency_name = models.CharField(max_length=6, default="Points")
     user_revenue_share = models.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -383,7 +386,7 @@ class PublisherPlacement(models.Model):
         self.currency = str(self.currency or "USD").strip().upper()
         if is_new and self.currency_name == "Points" and self.currency != "USD":
             self.currency_name = self.currency
-        self.currency_name = str(self.currency_name or "Points").strip()[:16]
+        self.currency_name = str(self.currency_name or "Points").strip()[:6]
         self.active_content_types = list(
             dict.fromkeys(
                 item
@@ -458,6 +461,11 @@ class WallVisit(models.Model):
     external_user_id = models.CharField(max_length=160, db_index=True)
     external_campaign_id = models.CharField(max_length=160, blank=True)
     affiliate_sub_id = models.CharField(max_length=160, blank=True)
+    affiliate_sub_id_3 = models.CharField(max_length=160, blank=True)
+    affiliate_sub_id_4 = models.CharField(max_length=160, blank=True)
+    affiliate_sub_id_5 = models.CharField(max_length=160, blank=True)
+    idfa = models.CharField(max_length=160, blank=True)
+    gaid = models.CharField(max_length=160, blank=True)
     entry_nonce = models.CharField(max_length=80)
     country_code = models.CharField(max_length=8, blank=True, db_index=True)
     device = models.CharField(max_length=40, blank=True)

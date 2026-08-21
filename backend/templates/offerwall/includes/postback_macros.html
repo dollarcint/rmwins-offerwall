@@ -1,0 +1,22 @@
+<section class="ow-ou-macros">
+  <h3>Available Macros</h3>
+  <p><strong>{app_id}*</strong><span>- The app_id passed in the offer URL.</span></p>
+  <p><strong>{SID}*</strong><span>- The unique user or click identifier passed in the offer URL.</span></p>
+  <p><strong>{OFFERID}</strong><span>- The ID of the completed offer.</span></p>
+  <p><strong>{STATUS}</strong><span>- Conversion status: 1 = Completed, 2 = Reversal.</span></p>
+  <p><strong>{PAYOUT}</strong><span>- The amount of currency the user should receive.</span></p>
+  <p><strong>{PUBPAYOUT}</strong><span>- The revenue in USD earned by the publisher.</span></p>
+  <p><strong>{SID2}</strong><span>- The value passed in sid2.</span></p>
+  <p><strong>{SID3}</strong><span>- The value passed in sid3.</span></p>
+  <p><strong>{SID4}</strong><span>- The value passed in sid4.</span></p>
+  <p><strong>{SID5}</strong><span>- The value passed in sid5.</span></p>
+  <p><strong>{eventid}</strong><span>- The ID of the related event.</span></p>
+  <p><strong>{eventname}</strong><span>- The name of the related event.</span></p>
+  <p><strong>{offername}</strong><span>- The name of the related offer.</span></p>
+  <p><strong>{IP}</strong><span>- The user's IP address.</span></p>
+  <p><strong>{TransactionID}</strong><span>- The unique conversion transaction ID.</span></p>
+  <p><strong>{idfa}</strong><span>- The IDFA passed on the tracking link.</span></p>
+  <p><strong>{gaid}</strong><span>- The GAID passed on the tracking link.</span></p>
+  <p><strong>{SIG}</strong><span>- HMAC-SHA256 of TransactionID using your postback secret.</span></p>
+  <div><b>Example:</b><code>https://example.com/postback?sub_id={SID}&amp;status={STATUS}&amp;payout={PAYOUT}&amp;TransactionID={TransactionID}&amp;hash={SIG}&amp;app_id={{ placement.app_id }}</code></div>
+</section>

@@ -1,4 +1,3 @@
-import json
 from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import patch
@@ -28,11 +27,9 @@ from .models import (
 from .security import (
     decrypt_placement_postback_secret,
     decrypt_signing_secret,
-    postback_signature,
     sign_click,
     sign_entry,
     sign_portal_access,
-    sign_placement_access,
     sign_result,
     sign_session,
 )
@@ -270,19 +267,32 @@ class OfferwallFlowTests(TestCase):
         self.assertContains(response, "Result pending")
 
     def test_inventory_api_authenticates_and_returns_signed_clicks(self):
-        unauthorized = self.client.get(reverse("offerwall:offers-api"), {"uid": "member-7"})
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="API wall",
+            website_name="API Site",
+            website_url="https://api-site.example.test",
+        )
+        query = {
+            "pubid": str(self.publisher.public_id),
+            "app_id": placement.app_id,
+        }
+        unauthorized = self.client.get(reverse("offerwall:offers-api"), query)
         self.assertEqual(unauthorized.status_code, 401)
         response = self.client.get(
             reverse("offerwall:offers-api"),
-            {"uid": "member-7"},
+            query,
             HTTP_X_OFFERWALL_KEY=self.api_key,
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["publisher"]["slug"], self.publisher.slug)
-        self.assertEqual(len(payload["offers"]), 1)
-        parsed = urlsplit(payload["offers"][0]["click_url"])
-        self.assertEqual(len(parse_qs(parsed.query)["sig"][0]), 64)
+        self.assertEqual(payload["code"], 200)
+        self.assertEqual(payload["data"]["query"]["appid"], placement.app_id)
+        offers = payload["data"]["response"]["offers"]
+        self.assertEqual(len(offers), 1)
+        parsed = urlsplit(offers[0]["offer_url_easy"])
+        self.assertEqual(parse_qs(parsed.query)["app_id"], [placement.app_id])
+        self.assertEqual(parse_qs(parsed.query)["uid"], ["{SID}"])
 
     def test_anonymous_root_is_offerwall_landing(self):
         response = self.client.get(reverse("home"))
@@ -544,15 +554,16 @@ class OfferwallFlowTests(TestCase):
         self.assertContains(page, "Total Revenue")
         self.assertContains(page, placement.app_id)
         self.assertContains(page, "Settings")
-        self.assertContains(page, "Respondents")
-        self.assertContains(page, "Open-ended answers")
+        self.assertContains(page, "Offers")
+        self.assertContains(page, "Wallet Ledger")
+        self.assertContains(page, "Developer Docs")
         settings_page = self.client.get(
             reverse(
                 "offerwall:publisher-placement-edit",
                 kwargs={"placement_id": placement.public_id},
             )
         )
-        self.assertContains(settings_page, "Recommended iframe")
+        self.assertContains(settings_page, "Quick Integrations")
         self.assertContains(settings_page, "Copy Code")
 
     def test_supplier_can_configure_all_placement_settings(self):
@@ -662,14 +673,50 @@ class OfferwallFlowTests(TestCase):
         )
         response = self.client.get(
             reverse("offerwall:offers-api"),
-            {"uid": "api-user", "app_id": placement.app_id},
+            {
+                "pubid": str(self.publisher.public_id),
+                "app_id": placement.app_id,
+            },
             HTTP_AUTHORIZATION=f"Bearer {self.api_key}",
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["app_id"], placement.app_id)
-        self.assertEqual(payload["publisher"]["currency"], "Coins")
-        self.assertEqual(payload["offers"][0]["reward"], "70.00")
+        self.assertEqual(payload["data"]["query"]["appid"], placement.app_id)
+        self.assertEqual(payload["data"]["response"]["currency_name"], "Coins")
+        self.assertEqual(payload["data"]["response"]["offers"][0]["payout"], 70.0)
+
+    def test_api_offer_tracking_creates_attributed_click(self):
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Tracking wall",
+            website_name="Tracking Site",
+            website_url="https://tracking.example.test",
+        )
+        response = self.client.get(
+            reverse("offerwall:offer-click-tracking"),
+            {
+                "app_id": placement.app_id,
+                "offer_id": self.survey.local_id,
+                "uid": "member-api-9",
+                "sid": "click-44",
+                "sid2": "source-2",
+                "sid3": "source-3",
+                "sid4": "source-4",
+                "sid5": "source-5",
+                "gaid": "android-ad-id",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/survey/start?rid=", response["Location"])
+        visit = WallVisit.objects.get(external_user_id="member-api-9")
+        self.assertEqual(visit.placement, placement)
+        self.assertEqual(visit.external_campaign_id, "click-44")
+        self.assertEqual(visit.affiliate_sub_id, "source-2")
+        self.assertEqual(visit.affiliate_sub_id_3, "source-3")
+        self.assertEqual(visit.affiliate_sub_id_4, "source-4")
+        self.assertEqual(visit.affiliate_sub_id_5, "source-5")
+        self.assertEqual(visit.gaid, "android-ad-id")
+        self.assertTrue(OfferClick.objects.filter(visit=visit, survey=self.survey).exists())
 
     def test_placement_embed_creates_placement_attributed_visit(self):
         placement = PublisherPlacement.objects.create(
@@ -721,21 +768,12 @@ class OfferwallFlowTests(TestCase):
         )
         self.assertEqual(direct_session["X-Frame-Options"], "DENY")
 
-        blocked = self.client.get(
-            f"{path}?uid=member-101",
-            HTTP_REFERER="https://attacker.example/",
-        )
-        self.assertEqual(blocked.status_code, 403)
-        self.assertFalse(WallVisit.objects.filter(external_user_id="member-101").exists())
-        self.assertEqual(self.client.get(f"{path}?uid=member-102").status_code, 403)
-
         direct = self.client.get(
             path,
             {
-                "uid": "member-direct",
+                "SID": "member-direct",
                 "campaign_id": "winter",
                 "subid": "cta",
-                "access": sign_placement_access(placement),
             },
         )
         self.assertEqual(direct.status_code, 302)
@@ -743,7 +781,7 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(direct_visit.external_campaign_id, "winter")
         self.assertEqual(direct_visit.affiliate_sub_id, "cta")
 
-    def test_supplier_can_edit_pause_activate_and_archive_own_placement(self):
+    def test_supplier_can_delete_own_placement(self):
         self._open_supplier_session(suffix="lifecycle")
         placement = PublisherPlacement.objects.create(
             publisher=self.publisher,
@@ -751,49 +789,17 @@ class OfferwallFlowTests(TestCase):
             website_name="Publisher Site",
             website_url="https://publisher.example.test",
         )
-        edit_url = reverse(
-            "offerwall:publisher-placement-edit",
-            kwargs={"placement_id": placement.public_id},
-        )
-        response = self.client.post(
-            edit_url,
-            {
-                "platform": PublisherPlacement.Platform.ANDROID,
-                "name": "Mobile rewards wall",
-                "website_name": "Publisher App",
-                "website_url": "https://app.publisher.example.test",
-                "allowed_domains": "rewards.publisher.example.test",
-                "postback_url": "",
-                "currency": "pts",
-                "currency_multiplier": "10",
-                "respondent_id_parameter": "player_id",
-                "campaign_id_parameter": "campaign",
-                "affiliate_sub_parameter": "source",
-            },
-        )
-        self.assertEqual(response.status_code, 302)
-        placement.refresh_from_db()
-        self.assertEqual(placement.name, "Mobile rewards wall")
-        self.assertEqual(placement.currency, "PTS")
-
         action_url = reverse(
             "offerwall:publisher-placement-action",
             kwargs={"placement_id": placement.public_id},
         )
-        self.client.post(action_url, {"action": "pause"})
-        placement.refresh_from_db()
-        self.assertEqual(placement.status, PublisherPlacement.Status.PAUSED)
-        embed_url = reverse(
-            "offerwall:placement-embed",
-            kwargs={"placement_id": placement.public_id},
+        response = self.client.post(action_url, {"action": "delete"})
+        self.assertRedirects(
+            response,
+            reverse("offerwall:publisher-placements"),
+            fetch_redirect_response=False,
         )
-        self.assertEqual(self.client.get(embed_url).status_code, 404)
-        self.client.post(action_url, {"action": "activate"})
-        placement.refresh_from_db()
-        self.assertEqual(placement.status, PublisherPlacement.Status.ACTIVE)
-        self.client.post(action_url, {"action": "archive"})
-        placement.refresh_from_db()
-        self.assertEqual(placement.status, PublisherPlacement.Status.ARCHIVED)
+        self.assertFalse(PublisherPlacement.objects.filter(pk=placement.pk).exists())
 
     def test_placement_postback_uses_placement_url_key_and_tracking_values(self):
         placement = PublisherPlacement.objects.create(
@@ -1058,48 +1064,43 @@ class OfferwallPostbackSecurityTests(TestCase):
         with self.assertRaisesMessage(ValueError, "non-public"):
             _validated_callback_url(self.publisher.callback_url)
 
-    @patch("offerwall.tasks.requests.post")
+    @patch("offerwall.tasks.requests.get")
     @patch("offerwall.tasks.socket.getaddrinfo")
-    def test_postback_is_signed_and_delivered_without_redirects(self, getaddrinfo, post):
+    def test_postback_requires_body_one_and_disables_redirects(self, getaddrinfo, get):
         getaddrinfo.return_value = [(2, 1, 6, "", ("93.184.216.34", 443))]
-        post.return_value.status_code = 204
+        get.return_value.status_code = 200
+        get.return_value.text = "1"
         result = deliver_postback_task(self.delivery.pk)
         self.assertEqual(result["status"], "delivered")
-        kwargs = post.call_args.kwargs
+        kwargs = get.call_args.kwargs
         self.assertFalse(kwargs["allow_redirects"])
         self.assertEqual(kwargs["timeout"], 3)
-        self.assertTrue(kwargs["headers"]["X-Offerwall-Signature"].startswith("sha256="))
-        self.assertEqual(json.loads(kwargs["data"]), self.delivery.payload)
+        self.assertEqual(kwargs["headers"]["User-Agent"], "RMWins-Offerwall/1.0")
         self.delivery.refresh_from_db()
         self.assertEqual(self.delivery.status, PostbackDelivery.Status.DELIVERED)
         self.assertEqual(self.delivery.attempt_count, 1)
 
-    @patch("offerwall.tasks.requests.post")
+    @patch("offerwall.tasks.requests.get")
     @patch("offerwall.tasks.socket.getaddrinfo")
-    def test_placement_delivery_uses_dedicated_signing_key(self, getaddrinfo, post):
+    def test_placement_delivery_renders_hmac_sig_macro(self, getaddrinfo, get):
         placement = PublisherPlacement.objects.create(
             publisher=self.publisher,
             name="Secure placement",
             website_name="Rewards",
             website_url="https://publisher.example.test",
             postback_enabled=True,
-            postback_url="https://publisher.example.test/placement-postback",
+            postback_url="https://publisher.example.test/placement-postback?sig={SIG}",
         )
         self.delivery.placement = placement
         self.delivery.callback_url = placement.postback_url
         self.delivery.save(update_fields=["placement", "callback_url", "updated_at"])
         getaddrinfo.return_value = [(2, 1, 6, "", ("93.184.216.34", 443))]
-        post.return_value.status_code = 200
+        get.return_value.status_code = 200
+        get.return_value.text = "1"
 
         result = deliver_postback_task(self.delivery.pk)
 
         self.assertEqual(result["status"], "delivered")
-        kwargs = post.call_args.kwargs
-        timestamp = int(kwargs["headers"]["X-Offerwall-Timestamp"])
-        expected = postback_signature(
-            decrypt_placement_postback_secret(placement),
-            timestamp=timestamp,
-            event_id=str(self.delivery.public_id),
-            body=kwargs["data"],
-        )
-        self.assertEqual(kwargs["headers"]["X-Offerwall-Signature"], f"sha256={expected}")
+        called_url = get.call_args.args[0]
+        self.assertNotIn("{SIG}", called_url)
+        self.assertEqual(len(parse_qs(urlsplit(called_url).query)["sig"][0]), 64)

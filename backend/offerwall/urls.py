@@ -15,6 +15,11 @@ urlpatterns = [
     ),
     path("wall/result/<uuid:click_id>/", views.result, name="result"),
     path("api/v1/offerwall/offers/", views.offers_api, name="offers-api"),
+    path(
+        "offerwall/clickTrackingLink/",
+        views.offer_click_tracking,
+        name="offer-click-tracking",
+    ),
     path("api/v1/offerwall/wallet/", views.wallet_api, name="wallet-api"),
     path("publisher/login/", views.supplier_login, name="supplier-login"),
     path("publisher/signup/", views.supplier_signup, name="supplier-signup"),
@@ -40,7 +45,7 @@ urlpatterns = [
         name="publisher-placement-action",
     ),
     path(
-        "publisher/placements/<uuid:placement_id>/postbacks/",
+        "publisher/placements/<uuid:placement_id>/postbacks/new/",
         views.publisher_placement_event_postback_add,
         name="publisher-placement-event-postback-add",
     ),

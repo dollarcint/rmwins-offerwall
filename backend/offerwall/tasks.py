@@ -3,7 +3,6 @@
 import hashlib
 import hmac
 import ipaddress
-import json
 import socket
 from datetime import timedelta
 from urllib.parse import urlsplit
@@ -15,11 +14,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import PostbackDelivery
-from .security import (
-    decrypt_placement_postback_secret,
-    decrypt_signing_secret,
-    postback_signature,
-)
+from .security import decrypt_placement_postback_secret, decrypt_signing_secret
 
 
 def _validated_callback_url(url: str) -> str:
@@ -101,30 +96,19 @@ def deliver_postback_task(self, delivery_id):
         ).hexdigest()
         callback_url = callback_url.replace("{SIG}", transaction_signature)
         callback_url = _validated_callback_url(callback_url)
-        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-        timestamp = int(timezone.now().timestamp())
-        signature = postback_signature(
-            signing_secret,
-            timestamp=timestamp,
-            event_id=str(delivery.public_id),
-            body=body,
-        )
-        response = requests.post(
+        response = requests.get(
             callback_url,
-            data=body,
             headers={
-                "Content-Type": "application/json",
                 "User-Agent": "RMWins-Offerwall/1.0",
-                "X-Offerwall-Event": str(delivery.public_id),
-                "X-Offerwall-Timestamp": str(timestamp),
-                "X-Offerwall-Signature": f"sha256={signature}",
             },
             timeout=settings.OFFERWALL_POSTBACK_TIMEOUT_SECONDS,
             allow_redirects=False,
         )
         response_code = response.status_code
-        if not 200 <= response_code < 300:
-            raise requests.HTTPError(f"Publisher returned HTTP {response_code}")
+        if not 200 <= response_code < 300 or response.text.strip() != "1":
+            raise requests.HTTPError(
+                f'Publisher must return body "1" (HTTP {response_code})'
+            )
     except Exception as exc:
         max_attempts = settings.OFFERWALL_POSTBACK_MAX_ATTEMPTS
         countdown = min(3600, 30 * (2 ** max(0, attempt_number - 1)))

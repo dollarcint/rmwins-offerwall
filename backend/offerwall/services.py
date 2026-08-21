@@ -239,6 +239,11 @@ def create_wall_visit(
     placement=None,
     external_campaign_id="",
     affiliate_sub_id="",
+    affiliate_sub_id_3="",
+    affiliate_sub_id_4="",
+    affiliate_sub_id_5="",
+    idfa="",
+    gaid="",
 ) -> WallVisit:
     location = resolve_entry_geolocation(request) if request is not None else {}
     client_data = get_request_client_data(request) if request is not None else {}
@@ -248,6 +253,11 @@ def create_wall_visit(
         "placement": placement,
         "external_campaign_id": str(external_campaign_id or "").strip()[:160],
         "affiliate_sub_id": str(affiliate_sub_id or "").strip()[:160],
+        "affiliate_sub_id_3": str(affiliate_sub_id_3 or "").strip()[:160],
+        "affiliate_sub_id_4": str(affiliate_sub_id_4 or "").strip()[:160],
+        "affiliate_sub_id_5": str(affiliate_sub_id_5 or "").strip()[:160],
+        "idfa": str(idfa or "").strip()[:160],
+        "gaid": str(gaid or "").strip()[:160],
         "entry_timestamp": entry_timestamp,
         "expires_at": now + timedelta(seconds=settings.OFFERWALL_VISIT_TTL_SECONDS),
         "country_code": str(location.get("country_code") or "")[:8],
@@ -279,6 +289,11 @@ def create_api_visit(
     placement=None,
     external_campaign_id="",
     affiliate_sub_id="",
+    affiliate_sub_id_3="",
+    affiliate_sub_id_4="",
+    affiliate_sub_id_5="",
+    idfa="",
+    gaid="",
 ) -> WallVisit:
     return create_wall_visit(
         publisher,
@@ -289,6 +304,11 @@ def create_api_visit(
         placement=placement,
         external_campaign_id=external_campaign_id,
         affiliate_sub_id=affiliate_sub_id,
+        affiliate_sub_id_3=affiliate_sub_id_3,
+        affiliate_sub_id_4=affiliate_sub_id_4,
+        affiliate_sub_id_5=affiliate_sub_id_5,
+        idfa=idfa,
+        gaid=gaid,
     )
 
 
@@ -377,7 +397,7 @@ def _postback_payload(click, attempt, event_type, ledger_entry, *, credited):
         "offer_id": click.survey.local_id,
         "click_id": str(click.public_id),
         "transaction_id": str(ledger_entry.public_id) if ledger_entry else "",
-        "status": attempt.status,
+        "status": "2" if event_type == "reversal" else "1",
         "status_label": attempt.get_status_display(),
         "term_reason": outcome.get("reason", ""),
         "term_category": outcome.get("category", ""),
@@ -394,6 +414,12 @@ def _postback_payload(click, attempt, event_type, ledger_entry, *, credited):
         "traffic_type": placement.traffic_type if placement else "",
         "campaign_id": click.visit.external_campaign_id,
         "affiliate_sub": click.visit.affiliate_sub_id,
+        "affiliate_sub_3": click.visit.affiliate_sub_id_3,
+        "affiliate_sub_4": click.visit.affiliate_sub_id_4,
+        "affiliate_sub_5": click.visit.affiliate_sub_id_5,
+        "idfa": click.visit.idfa,
+        "gaid": click.visit.gaid,
+        "ip": str(attempt.initiation_ip or ""),
         "verified": bool(attempt.is_verified),
         "occurred_at": timezone.now().isoformat(),
     }
@@ -408,14 +434,16 @@ def _render_postback_url(template, payload):
         "{PAYOUT}": payload.get("reward_amount", ""),
         "{PUBPAYOUT}": payload.get("payout_amount", ""),
         "{SID2}": payload.get("affiliate_sub", ""),
-        "{SID3}": "",
-        "{SID4}": "",
-        "{SID5}": "",
+        "{SID3}": payload.get("affiliate_sub_3", ""),
+        "{SID4}": payload.get("affiliate_sub_4", ""),
+        "{SID5}": payload.get("affiliate_sub_5", ""),
         "{eventid}": payload.get("event_id", ""),
         "{eventname}": payload.get("event", ""),
         "{offername}": payload.get("offer_name", ""),
-        "{IP}": "",
+        "{IP}": payload.get("ip", ""),
         "{TransactionID}": payload.get("transaction_id", ""),
+        "{idfa}": payload.get("idfa", ""),
+        "{gaid}": payload.get("gaid", ""),
     }
     rendered = str(template or "")
     for macro, value in values.items():
@@ -575,14 +603,6 @@ def process_attempt_outcome(attempt_id: int):
         credit = RewardLedgerEntry.objects.filter(
             click=click, entry_type=RewardLedgerEntry.EntryType.CREDIT
         ).first()
-        if authoritative and attempt.status in FINAL_STATUSES:
-            event_type = {
-                SurveyAttempt.Status.TERMINATED: "terminate",
-                SurveyAttempt.Status.OVER_QUOTA: "over_quota",
-                SurveyAttempt.Status.QUALITY_TERMINATED: "quality_terminate",
-                SurveyAttempt.Status.COMPLETED: "complete_uncredited",
-            }[attempt.status]
-            _create_postback(click, attempt, event_type, credited=False)
         if credit and attempt.status != SurveyAttempt.Status.COMPLETED and authoritative:
             reversal, _ = _create_reversal(click, credit)
             _create_postback(

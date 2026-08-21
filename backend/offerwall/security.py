@@ -33,6 +33,16 @@ def digest_api_key(raw_key: str) -> str:
     ).hexdigest()
 
 
+def encrypt_api_key(raw_key: str) -> str:
+    return encrypt_secret(raw_key)
+
+
+def decrypt_api_key(publisher) -> str:
+    if not publisher.encrypted_api_key:
+        return ""
+    return decrypt_secret(publisher.encrypted_api_key)
+
+
 def encrypt_signing_secret(secret: str) -> str:
     return encrypt_secret(secret)
 
