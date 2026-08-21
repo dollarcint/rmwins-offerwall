@@ -4,6 +4,7 @@ from decimal import Decimal
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
+from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase, override_settings
 from django.core.exceptions import ValidationError
 from django.urls import reverse
@@ -17,6 +18,7 @@ from .models import (
     OfferOverride,
     PostbackDelivery,
     Publisher,
+    PublisherPortalAccount,
     PublisherPayoutRequest,
     RewardLedgerEntry,
     WallVisit,
@@ -280,7 +282,155 @@ class OfferwallFlowTests(TestCase):
     def test_anonymous_root_is_offerwall_landing(self):
         response = self.client.get(reverse("home"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Publisher-powered survey inventory")
+        self.assertContains(response, "Create supplier account")
+        self.assertContains(response, reverse("offerwall:supplier-login"))
+        self.assertContains(response, reverse("offerwall:supplier-signup"))
+
+    def test_supplier_registration_creates_pending_inactive_account(self):
+        response = self.client.post(
+            reverse("offerwall:supplier-signup"),
+            {
+                "company_name": "New Traffic Company",
+                "contact_name": "Asha Verma",
+                "business_email": "asha@newtraffic.example",
+                "phone": "+91 90000 00000",
+                "website": "https://newtraffic.example",
+                "country": "India",
+                "username": "newtrafficowner",
+                "password1": "Strong-Pass-893!",
+                "password2": "Strong-Pass-893!",
+                "accept_terms": "on",
+            },
+        )
+        self.assertRedirects(
+            response,
+            reverse("offerwall:publisher-dashboard"),
+            fetch_redirect_response=False,
+        )
+        account = PublisherPortalAccount.objects.select_related("publisher", "user").get(
+            user__username="newtrafficowner"
+        )
+        self.assertEqual(account.status, PublisherPortalAccount.Status.PENDING)
+        self.assertFalse(account.publisher.is_active)
+        self.assertEqual(account.user.email, "asha@newtraffic.example")
+        self.assertNotIn("_auth_user_id", self.client.session)
+        status_page = self.client.get(reverse("offerwall:publisher-dashboard"))
+        self.assertContains(status_page, "application is under review")
+        self.assertContains(status_page, "New Traffic Company")
+
+    def test_approved_supplier_can_login_with_email_and_open_wallet(self):
+        user = get_user_model().objects.create_user(
+            username="approvedsupplier",
+            email="owner@approved.example",
+            password="Strong-Pass-893!",
+        )
+        publisher = Publisher.objects.create(
+            name="Approved Supplier",
+            slug="approved-supplier",
+            is_active=True,
+        )
+        PublisherPortalAccount.objects.create(
+            user=user,
+            publisher=publisher,
+            contact_name="Approved Owner",
+            business_email="owner@approved.example",
+            phone="+1 555 100 2000",
+            country="United States",
+            status=PublisherPortalAccount.Status.APPROVED,
+        )
+        response = self.client.post(
+            reverse("offerwall:supplier-login"),
+            {
+                "identity": "owner@approved.example",
+                "password": "Strong-Pass-893!",
+                "remember_me": "on",
+            },
+        )
+        self.assertRedirects(
+            response,
+            reverse("offerwall:publisher-dashboard"),
+            fetch_redirect_response=False,
+        )
+        dashboard = self.client.get(reverse("offerwall:publisher-dashboard"))
+        self.assertContains(dashboard, "Available balance")
+        self.assertContains(dashboard, "Approved Supplier")
+        home = self.client.get(reverse("home"))
+        self.assertEqual(home.status_code, 200)
+        self.assertContains(home, "Create supplier account")
+        internal_page = self.client.get(reverse("projects"))
+        self.assertEqual(internal_page.status_code, 302)
+        self.assertIn("/login/", internal_page["Location"])
+
+    def test_supplier_login_rejects_workspace_account_without_publisher(self):
+        get_user_model().objects.create_user(
+            username="workspace-only",
+            email="workspace@example.test",
+            password="Strong-Pass-893!",
+        )
+        response = self.client.post(
+            reverse("offerwall:supplier-login"),
+            {"identity": "workspace-only", "password": "Strong-Pass-893!"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Username/email or password is incorrect")
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_internal_operations_page_approves_supplier_registration(self):
+        operator = get_user_model().objects.create_user(
+            username="offerwall-operator",
+            password="Strong-Pass-893!",
+            is_staff=True,
+        )
+        supplier_user = get_user_model().objects.create_user(
+            username="pending-owner",
+            email="pending@example.test",
+            password="Strong-Pass-893!",
+        )
+        pending_publisher = Publisher.objects.create(
+            name="Pending Supplier",
+            slug="pending-supplier",
+            is_active=False,
+        )
+        registration = PublisherPortalAccount.objects.create(
+            user=supplier_user,
+            publisher=pending_publisher,
+            contact_name="Pending Owner",
+            business_email="pending@example.test",
+            phone="+91 90000 11111",
+            country="India",
+        )
+        self.assertRedirects(
+            self.client.get(reverse("offerwall:operations")),
+            f"/login/?next={reverse('offerwall:operations')}",
+            fetch_redirect_response=False,
+        )
+        self.client.force_login(operator)
+        page = self.client.get(reverse("offerwall:operations"))
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "Pending Supplier")
+        response = self.client.post(
+            reverse("offerwall:operations-action"),
+            {
+                "action": "approve-registration",
+                "registration_id": registration.pk,
+            },
+        )
+        self.assertRedirects(
+            response, reverse("offerwall:operations"), fetch_redirect_response=False
+        )
+        registration.refresh_from_db()
+        pending_publisher.refresh_from_db()
+        self.assertEqual(registration.status, PublisherPortalAccount.Status.APPROVED)
+        self.assertEqual(registration.reviewed_by, operator)
+        self.assertTrue(pending_publisher.is_active)
+
+        old_api_hash = pending_publisher.api_key_hash
+        self.client.post(
+            reverse("offerwall:operations-action"),
+            {"action": "rotate-api-key", "publisher_id": pending_publisher.pk},
+        )
+        pending_publisher.refresh_from_db()
+        self.assertNotEqual(pending_publisher.api_key_hash, old_api_hash)
 
     def _credit_click(self):
         click = self._click()

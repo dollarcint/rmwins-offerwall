@@ -16,6 +16,8 @@ urlpatterns = [
     path("wall/result/<uuid:click_id>/", views.result, name="result"),
     path("api/v1/offerwall/offers/", views.offers_api, name="offers-api"),
     path("api/v1/offerwall/wallet/", views.wallet_api, name="wallet-api"),
+    path("publisher/login/", views.supplier_login, name="supplier-login"),
+    path("publisher/signup/", views.supplier_signup, name="supplier-signup"),
     path(
         "publisher/access/<slug:publisher_slug>/",
         views.publisher_access,
@@ -28,4 +30,10 @@ urlpatterns = [
         name="publisher-withdrawal",
     ),
     path("publisher/logout/", views.publisher_logout, name="publisher-logout"),
+    path("operations/", views.offerwall_operations, name="operations"),
+    path(
+        "operations/action/",
+        views.offerwall_operations_action,
+        name="operations-action",
+    ),
 ]

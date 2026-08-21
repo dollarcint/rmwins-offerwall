@@ -13,12 +13,13 @@ from .models import (
     OfferOverride,
     PostbackDelivery,
     Publisher,
+    PublisherPortalAccount,
     PublisherPayoutRequest,
     RewardLedgerEntry,
     WallVisit,
 )
 from .security import signed_entry_query, signed_portal_query
-from .services import ensure_service_user
+from .services import ensure_service_user, review_publisher_registration
 from .wallet import transition_payout, wallet_summary
 
 
@@ -174,6 +175,93 @@ class PublisherAdmin(admin.ModelAdmin):
                 f"Copy this Offerwall API key now; it is shown once: {api_key}",
                 level=messages.WARNING,
             )
+
+
+def _review_supplier_registrations(modeladmin, request, queryset, status):
+    count = 0
+    for account in queryset:
+        review_publisher_registration(account, status, reviewer=request.user)
+        count += 1
+    modeladmin.message_user(request, f"Updated {count} supplier registration(s).")
+
+
+@admin.action(description="Approve selected supplier registrations")
+def approve_supplier_registrations(modeladmin, request, queryset):
+    _review_supplier_registrations(
+        modeladmin, request, queryset, PublisherPortalAccount.Status.APPROVED
+    )
+
+
+@admin.action(description="Reject selected supplier registrations")
+def reject_supplier_registrations(modeladmin, request, queryset):
+    _review_supplier_registrations(
+        modeladmin, request, queryset, PublisherPortalAccount.Status.REJECTED
+    )
+
+
+@admin.register(PublisherPortalAccount)
+class PublisherPortalAccountAdmin(admin.ModelAdmin):
+    list_display = [
+        "publisher",
+        "contact_name",
+        "business_email",
+        "country",
+        "status",
+        "created_at",
+    ]
+    list_filter = ["status", "country", "created_at"]
+    search_fields = [
+        "publisher__name",
+        "publisher__slug",
+        "contact_name",
+        "user__username",
+        "user__email",
+    ]
+    readonly_fields = [
+        "user",
+        "publisher",
+        "contact_name",
+        "business_email",
+        "phone",
+        "website",
+        "country",
+        "reviewed_by",
+        "reviewed_at",
+        "created_at",
+        "updated_at",
+    ]
+    fields = [
+        "status",
+        "user",
+        "publisher",
+        "contact_name",
+        "business_email",
+        "phone",
+        "website",
+        "country",
+        "admin_note",
+        "reviewed_by",
+        "reviewed_at",
+        "created_at",
+        "updated_at",
+    ]
+    actions = [approve_supplier_registrations, reject_supplier_registrations]
+
+    def save_model(self, request, obj, form, change):
+        previous_status = None
+        if obj.pk:
+            previous_status = type(obj).objects.filter(pk=obj.pk).values_list(
+                "status", flat=True
+            ).first()
+        if previous_status != obj.status:
+            obj.reviewed_by = request.user
+            obj.reviewed_at = timezone.now()
+        super().save_model(request, obj, form, change)
+        should_be_active = obj.status == PublisherPortalAccount.Status.APPROVED
+        Publisher.objects.filter(pk=obj.publisher_id).update(
+            is_active=should_be_active,
+            updated_at=timezone.now(),
+        )
 
 
 @admin.register(OfferOverride)

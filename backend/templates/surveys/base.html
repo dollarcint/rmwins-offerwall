@@ -57,6 +57,9 @@
         {% if 'organization.view' in access_codes %}<a class="nav-item {% if active_page == 'organization' %}active{% endif %}" href="{% url 'organization-management' %}">
           <span class="nav-icon nav-icon-svg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v5m-6 4v7m12-7v7M6 13h12M3 9h6v4H3zm12 0h6v4h-6zM9 3h6v4H9z"/></svg></span><span>Organization</span>
         </a>{% endif %}
+        {% if request.user.is_staff %}<a class="nav-item {% if active_page == 'offerwall-operations' %}active{% endif %}" href="{% url 'offerwall:operations' %}">
+          <span class="nav-icon">◈</span><span>Offerwall</span>
+        </a>{% endif %}
         {% if 'access.manage' in access_codes or 'users.view' in access_codes or 'users.create' in access_codes or 'roles.view' in access_codes or 'roles.create' in access_codes or 'respondents.create' in access_codes %}
         <a class="nav-item {% if active_page == 'access-control' %}active{% endif %}" href="{% url 'access-control' %}">
           <span class="nav-icon">âš™</span><span>Access control</span>

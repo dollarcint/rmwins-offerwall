@@ -24,6 +24,7 @@ from .models import (
     OfferOverride,
     PostbackDelivery,
     Publisher,
+    PublisherPortalAccount,
     RewardLedgerEntry,
     WallVisit,
 )
@@ -39,6 +40,47 @@ FINAL_STATUSES = {
     SurveyAttempt.Status.QUALITY_TERMINATED,
 }
 LOCAL_AUTHORITATIVE_SOURCES = {"local_prescreener", "local_country_guard"}
+
+
+def review_publisher_registration(
+    account: PublisherPortalAccount,
+    status: str,
+    *,
+    reviewer=None,
+    admin_note: str = "",
+) -> PublisherPortalAccount:
+    """Approve or reject a supplier application and keep activation in sync."""
+
+    allowed = {
+        PublisherPortalAccount.Status.APPROVED,
+        PublisherPortalAccount.Status.REJECTED,
+    }
+    if status not in allowed:
+        raise ValueError("Supplier registration status is not reviewable.")
+    with transaction.atomic():
+        locked = (
+            PublisherPortalAccount.objects.select_for_update()
+            .select_related("publisher")
+            .get(pk=account.pk)
+        )
+        locked.status = status
+        locked.reviewed_by = reviewer
+        locked.reviewed_at = timezone.now()
+        locked.admin_note = str(admin_note or locked.admin_note or "").strip()[:500]
+        locked.save(
+            update_fields=[
+                "status",
+                "reviewed_by",
+                "reviewed_at",
+                "admin_note",
+                "updated_at",
+            ]
+        )
+        should_be_active = status == PublisherPortalAccount.Status.APPROVED
+        if locked.publisher.is_active != should_be_active:
+            locked.publisher.is_active = should_be_active
+            locked.publisher.save(update_fields=["is_active", "updated_at"])
+        return locked
 
 
 def public_base_url() -> str:

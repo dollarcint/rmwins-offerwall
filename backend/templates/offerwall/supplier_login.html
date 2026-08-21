@@ -1,0 +1,37 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}Supplier login · RM Wins Offerwall{% endblock %}
+{% block content %}
+<section class="ow-auth-shell">
+  <div class="ow-auth-story">
+    <a class="ow-auth-back" href="/">← Back to home</a>
+    <span class="ow-eyebrow"><i></i> Supplier portal</span>
+    <h1>Welcome back to your revenue workspace.</h1>
+    <p>Review verified earnings, track respondent activity and manage withdrawal requests from one secure account.</p>
+    <ul>
+      <li><span>✓</span><div><strong>Verified reward ledger</strong><small>Every credit and reversal stays auditable.</small></div></li>
+      <li><span>✓</span><div><strong>Private supplier access</strong><small>Your account is separate from RM Wins administration.</small></div></li>
+      <li><span>✓</span><div><strong>Protected sessions</strong><small>Rate limits, CSRF protection and secure cookies are enforced.</small></div></li>
+    </ul>
+  </div>
+  <div class="ow-auth-card">
+    <div class="ow-auth-card-head">
+      <span>Secure access</span>
+      <h2>Supplier login</h2>
+      <p>Use the credentials created during registration.</p>
+    </div>
+    <form method="post" class="ow-auth-form" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="ow-form-alert">{{ form.non_field_errors|striptags }}</div>{% endif %}
+      {% for field in form %}
+        {% if field.name == 'remember_me' %}
+          <label class="ow-check">{{ field }}<span>{{ field.label }}</span></label>
+        {% else %}
+          <label>{{ field.label }}{{ field }}{% if field.errors %}<small class="ow-field-error">{{ field.errors|striptags }}</small>{% endif %}</label>
+        {% endif %}
+      {% endfor %}
+      <button class="ow-submit" type="submit">Login to supplier portal <span>→</span></button>
+    </form>
+    <p class="ow-auth-switch">New supplier? <a href="{% url 'offerwall:supplier-signup' %}">Create an account</a></p>
+  </div>
+</section>
+{% endblock %}

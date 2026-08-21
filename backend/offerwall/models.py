@@ -110,6 +110,56 @@ class Publisher(models.Model):
         super().save(*args, **kwargs)
 
 
+class PublisherPortalAccount(models.Model):
+    """Supplier-owned login awaiting an explicit RM Wins approval."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending review"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="offerwall_portal_account",
+    )
+    publisher = models.OneToOneField(
+        Publisher,
+        on_delete=models.PROTECT,
+        related_name="portal_account",
+    )
+    contact_name = models.CharField(max_length=160)
+    business_email = models.EmailField(max_length=254, unique=True)
+    phone = models.CharField(max_length=40, blank=True)
+    website = models.URLField(max_length=500, blank=True)
+    country = models.CharField(max_length=80)
+    status = models.CharField(
+        max_length=12,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    admin_note = models.CharField(max_length=500, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_offerwall_registrations",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Supplier registration"
+        verbose_name_plural = "Supplier registrations"
+
+    def __str__(self):
+        return f"{self.publisher.name} · {self.user.username} · {self.status}"
+
+
 class OfferOverride(models.Model):
     """Publisher-specific exclusion, reward or presentation override for a survey."""
 

@@ -16,7 +16,7 @@ databases, Redis instances, app directory, runtime directory, or systemd units.
 | Services | `rmwins-offerwall-supervisor.service`, `rmwins-offerwall-frontend.service` |
 
 All provider credentials are blank and scheduled jobs are disabled on the
-first deploy. Add integrations only inside the Offerwall admin after each
+first deploy. Add integrations only inside the authenticated staff workspace after each
 feature is deliberately enabled.
 
 ## Build and snapshot
@@ -56,8 +56,9 @@ Alessar service states are checked before and after deployment.
 4. Install `nginx-offerwall-https.conf`, run `nginx -t`, reload, and only
    then enable Django SSL redirect/HSTS in the protected Offerwall environment.
 
-The public root is the Offerwall landing page. Respondents enter inventory through
-signed publisher wall links, and publishers exchange a one-time signed link for a
-private wallet session. React serves only the staff login surface; Offerwall pages,
-survey callbacks, APIs, admin and workspace pages are served by the isolated Django
-backend. The historical `/setup/` route hands off to Django Admin.
+The public root is the Offerwall landing page. Suppliers register and login through
+the dedicated publisher frontend, while staff use `/login/` and the custom Offerwall
+Operations workspace for approvals, credentials, payouts and delivery monitoring.
+Respondents enter inventory through signed publisher wall links. React serves only
+the staff login surface; Offerwall pages, callbacks, APIs and workspace pages are
+served by the isolated Django backend.

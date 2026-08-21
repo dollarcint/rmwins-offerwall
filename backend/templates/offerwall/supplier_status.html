@@ -1,0 +1,27 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}Registration status · RM Wins Offerwall{% endblock %}
+{% block content %}
+<section class="ow-status-shell">
+  <article class="ow-status-card {{ supplier_account.status }}">
+    <span class="ow-status-icon">{% if supplier_account.status == 'rejected' %}!{% else %}✓{% endif %}</span>
+    <span class="ow-eyebrow"><i></i> Supplier registration</span>
+    {% if supplier_account.status == 'rejected' %}
+      <h1>Application needs attention.</h1>
+      <p>Your supplier registration was not approved. Contact RM Wins if the company information should be reviewed again.</p>
+    {% elif supplier_account.status == 'approved' %}
+      <h1>Your supplier account is currently disabled.</h1>
+      <p>The registration for <strong>{{ supplier_account.publisher.name }}</strong> is approved, but inventory and portal access are temporarily inactive. Contact RM Wins for assistance.</p>
+    {% else %}
+      <h1>Your application is under review.</h1>
+      <p>We received the registration for <strong>{{ supplier_account.publisher.name }}</strong>. Inventory and integration access will appear here after approval.</p>
+    {% endif %}
+    <dl>
+      <div><dt>Company</dt><dd>{{ supplier_account.publisher.name }}</dd></div>
+      <div><dt>Business email</dt><dd>{{ supplier_account.user.email }}</dd></div>
+      <div><dt>Status</dt><dd>{{ supplier_account.get_status_display }}</dd></div>
+      <div><dt>Submitted</dt><dd>{{ supplier_account.created_at|date:"d M Y, H:i" }}</dd></div>
+    </dl>
+    <p class="ow-status-note">You can safely close this page and login again later to check the latest status.</p>
+  </article>
+</section>
+{% endblock %}

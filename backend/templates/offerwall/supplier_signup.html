@@ -1,0 +1,33 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}Supplier registration · RM Wins Offerwall{% endblock %}
+{% block content %}
+<section class="ow-signup-shell">
+  <div class="ow-signup-intro">
+    <a class="ow-auth-back" href="/">← Back to home</a>
+    <span class="ow-eyebrow"><i></i> Supplier registration</span>
+    <h1>Build your survey revenue channel with RM Wins.</h1>
+    <p>Create the primary supplier account for your company. Every application is reviewed before inventory and integration access are activated.</p>
+    <div class="ow-review-steps">
+      <div><span>1</span><strong>Submit company details</strong></div>
+      <div><span>2</span><strong>RM Wins verification</strong></div>
+      <div><span>3</span><strong>Integration access</strong></div>
+    </div>
+  </div>
+  <div class="ow-signup-card">
+    <header><span>Get started</span><h2>Create supplier account</h2><p>Use accurate business details to speed up approval.</p></header>
+    <form method="post" class="ow-auth-form ow-signup-form" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="ow-form-alert full">{{ form.non_field_errors|striptags }}</div>{% endif %}
+      {% for field in form %}
+        {% if field.name == 'accept_terms' %}
+          <label class="ow-check full">{{ field }}<span>{{ field.label }}</span>{% if field.errors %}<small class="ow-field-error">{{ field.errors|striptags }}</small>{% endif %}</label>
+        {% else %}
+          <label class="{% if field.name == 'company_name' or field.name == 'website' %}full{% endif %}">{{ field.label }}{{ field }}{% if field.errors %}<small class="ow-field-error">{{ field.errors|striptags }}</small>{% endif %}</label>
+        {% endif %}
+      {% endfor %}
+      <button class="ow-submit full" type="submit">Submit registration <span>→</span></button>
+    </form>
+    <p class="ow-auth-switch">Already registered? <a href="{% url 'offerwall:supplier-login' %}">Supplier login</a></p>
+  </div>
+</section>
+{% endblock %}

@@ -9,7 +9,7 @@ Production: `https://offerwall.rmwinsights.com`
 
 ## Applications
 
-- `backend/` — Django admin, survey inventory, provider callbacks and the Offerwall application.
+- `backend/` — internal workspace, survey inventory, provider callbacks and the Offerwall application.
 - `frontend/` — React/Vite staff login surface.
 - `deploy/offerwall-cyberpanel/` — isolated VPS runtime assets for this repository only.
 
@@ -36,11 +36,13 @@ npm run dev
 Copy `backend/.env.example` to `backend/.env` for local-only values. Never commit real provider,
 publisher, encryption or database credentials.
 
-## Publisher setup
+## Supplier onboarding and operations
 
-1. Open Django Admin and create an **Offerwall publisher**.
-2. Copy the one-time signing secret and inventory API key shown after save.
-3. Keep all live eligible surveys assigned by default. Add an Offer Override only to exclude,
+1. A supplier registers at `/publisher/signup/` and receives a pending portal account.
+2. Staff sign in through the existing `/login/` workspace and open **Offerwall** in the sidebar.
+3. Approve the supplier registration, then generate the one-time signing secret and inventory API
+   key from the custom Offerwall Operations screen.
+4. Keep all live eligible surveys assigned by default. Add an Offer Override only to exclude,
    feature, rename or change the payout percentage for a particular survey.
 4. Generate a test link from the publisher admin page or with:
 
@@ -53,10 +55,10 @@ The wall only credits a completion after the existing survey callback flow marks
 verified. A publisher/user/survey combination can receive one credit. Subsequent saves and callback
 retries are idempotent.
 
-The same publisher admin page generates a one-time signed dashboard link. The publisher can view
-its available/reserved/paid balance, reward ledger and withdrawal history, then submit a payout
-request. Staff approve, process, reject or mark payouts paid from Django Admin; a payment reference
-is mandatory for the paid transition.
+Approved suppliers login at `/publisher/login/`. They can view available/reserved/paid balance,
+reward ledger and withdrawal history, then submit a payout request. Staff approve, process, reject
+or mark payouts paid from the internal **Offerwall Operations** page; a payment reference is
+mandatory for the paid transition. Django Admin is not required for the operational workflow.
 
 See [Publisher integration](docs/OFFERWALL_INTEGRATION.md) for the signed URL, inventory API and
 postback contract.

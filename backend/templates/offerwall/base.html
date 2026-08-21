@@ -8,7 +8,7 @@
   <meta name="description" content="RM Wins secure survey offerwall">
   <title>{% block title %}RM Wins Offerwall{% endblock %}</title>
   {% include 'includes/favicon_links.html' %}
-  <link rel="stylesheet" href="{% static 'offerwall/offerwall.css' %}?v=1">
+  <link rel="stylesheet" href="{% static 'offerwall/offerwall.css' %}?v=2">
 </head>
 <body>
   <header class="ow-topbar">
@@ -21,7 +21,13 @@
       <span>{{ portal_publisher.name }}</span>
       <form action="{% url 'offerwall:publisher-logout' %}" method="post">{% csrf_token %}<button type="submit">Sign out</button></form>
     </div>
-    {% else %}<span class="ow-secure"><i aria-hidden="true"></i> Secure survey marketplace</span>{% endif %}
+    {% else %}
+    <nav class="ow-public-nav" aria-label="Supplier navigation">
+      <a class="ow-nav-link" href="/">Home</a>
+      <a class="ow-nav-link" href="{% url 'offerwall:supplier-login' %}">Login</a>
+      <a class="ow-nav-cta" href="{% url 'offerwall:supplier-signup' %}">Join as supplier</a>
+    </nav>
+    {% endif %}
   </header>
   <main>
     {% if messages %}<div class="ow-messages" aria-live="polite">{% for message in messages %}<div class="{{ message.tags }}">{{ message }}</div>{% endfor %}</div>{% endif %}

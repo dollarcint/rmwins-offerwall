@@ -1,30 +1,45 @@
 """Public signed wall, offer clicks, result pages and publisher inventory API."""
 
 import re
+import secrets
 from datetime import datetime, timezone as datetime_timezone
 from decimal import Decimal
 
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.decorators import user_passes_test
 from django.core.cache import caches
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Count, Q
 from django.http import HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_POST
+from django.utils.text import slugify
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from accounts.throttling import (
+    consume_login_attempt,
+    login_request_body_too_large,
+    reset_login_account_attempts,
+)
 from surveys.models import Survey, SurveyAttempt
 
+from .forms import SupplierLoginForm, SupplierSignupForm
 from .models import (
     OfferClick,
+    PostbackDelivery,
     Publisher,
+    PublisherPortalAccount,
+    PublisherPayoutRequest,
     RewardLedgerEntry,
     WallVisit,
 )
 from .security import (
     digest_api_key,
+    generate_signing_secret,
     verify_click_signature,
     verify_entry_signature,
     verify_portal_access,
@@ -37,14 +52,27 @@ from .services import (
     create_wall_visit,
     offer_catalog,
     process_attempt_outcome,
+    review_publisher_registration,
     result_url,
     session_url,
 )
-from .wallet import request_withdrawal, wallet_summary
+from .wallet import request_withdrawal, transition_payout, wallet_summary
 
 
 USER_ID_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,160}$")
 PORTAL_SESSION_KEY = "offerwall_publisher_id"
+SUPPLIER_ACCOUNT_SESSION_KEY = "offerwall_supplier_publisher_id"
+
+
+def _registration_slug(company_name: str) -> str:
+    base = slugify(company_name)[:48] or "supplier"
+    if not base[0].isalpha():
+        base = f"supplier-{base}"[:48]
+    for _ in range(10):
+        candidate = f"{base}-{secrets.token_hex(3)}"
+        if not Publisher.objects.filter(slug=candidate).exists():
+            return candidate
+    raise ValidationError("A supplier code could not be generated. Please try again.")
 
 
 def _no_store(response):
@@ -91,6 +119,296 @@ def landing(request):
             },
         )
     )
+
+
+def _supplier_account(request):
+    publisher_id = str(request.session.get(SUPPLIER_ACCOUNT_SESSION_KEY) or "").strip()
+    if not publisher_id:
+        return None
+    account = (
+        PublisherPortalAccount.objects.select_related("publisher", "user")
+        .filter(publisher__public_id=publisher_id)
+        .first()
+    )
+    if not account or not account.user.is_active:
+        request.session.pop(SUPPLIER_ACCOUNT_SESSION_KEY, None)
+        return None
+    return account
+
+
+@require_http_methods(["GET", "POST"])
+def supplier_login(request):
+    existing_account = _supplier_account(request)
+    if existing_account:
+        return HttpResponseRedirect(reverse("offerwall:publisher-dashboard"))
+
+    if request.method == "POST":
+        if login_request_body_too_large(request):
+            return _error(request, "Login request too large", "Please try again.", status=413)
+        form = SupplierLoginForm(request.POST)
+        identity = str(request.POST.get("identity") or "").strip()
+        user_record = (
+            get_user_model()
+            .objects.filter(Q(username__iexact=identity) | Q(email__iexact=identity))
+            .first()
+        )
+        throttle_identity = user_record.username if user_record else identity
+        if not consume_login_attempt(request, throttle_identity):
+            response = _error(
+                request,
+                "Too many login attempts",
+                "Please wait a few minutes and try again.",
+                status=429,
+            )
+            response["Retry-After"] = str(settings.AUTH_LOGIN_WINDOW_SECONDS)
+            return response
+        if form.is_valid():
+            identity = form.cleaned_data["identity"].strip()
+            username = user_record.username if user_record else identity
+            user = authenticate(
+                request,
+                username=username,
+                password=form.cleaned_data["password"],
+            )
+            account = (
+                PublisherPortalAccount.objects.select_related("publisher")
+                .filter(user=user)
+                .first()
+                if user
+                else None
+            )
+            if account:
+                request.session.cycle_key()
+                request.session.pop(PORTAL_SESSION_KEY, None)
+                request.session[SUPPLIER_ACCOUNT_SESSION_KEY] = str(
+                    account.publisher.public_id
+                )
+                reset_login_account_attempts(throttle_identity)
+                if form.cleaned_data.get("remember_me"):
+                    request.session.set_expiry(settings.OFFERWALL_PORTAL_SESSION_TTL_SECONDS)
+                else:
+                    request.session.set_expiry(0)
+                return HttpResponseRedirect(reverse("offerwall:publisher-dashboard"))
+            form.add_error(None, "Username/email or password is incorrect.")
+    else:
+        form = SupplierLoginForm()
+    return _no_store(render(request, "offerwall/supplier_login.html", {"form": form}))
+
+
+@require_http_methods(["GET", "POST"])
+def supplier_signup(request):
+    existing_account = _supplier_account(request)
+    if existing_account:
+        return HttpResponseRedirect(reverse("offerwall:publisher-dashboard"))
+
+    if request.method == "POST":
+        if login_request_body_too_large(request):
+            return _error(request, "Registration request too large", "Please try again.", status=413)
+        form = SupplierSignupForm(request.POST)
+        if _rate_limited(
+            request,
+            "supplier-signup",
+            settings.OFFERWALL_SIGNUP_RATE_LIMIT_PER_MINUTE,
+        ):
+            return _error(
+                request,
+                "Too many registrations",
+                "Please wait a minute and try again.",
+                status=429,
+            )
+        if form.is_valid():
+            data = form.cleaned_data
+            with transaction.atomic():
+                user = get_user_model().objects.create_user(
+                    username=data["username"],
+                    email=data["business_email"],
+                    password=data["password1"],
+                    first_name=data["contact_name"][:150],
+                    is_active=True,
+                    is_staff=False,
+                    is_superuser=False,
+                )
+                publisher = Publisher.objects.create(
+                    name=data["company_name"],
+                    slug=_registration_slug(data["company_name"]),
+                    is_active=False,
+                )
+                PublisherPortalAccount.objects.create(
+                    user=user,
+                    publisher=publisher,
+                    contact_name=data["contact_name"],
+                    business_email=data["business_email"],
+                    phone=data["phone"],
+                    website=data["website"],
+                    country=data["country"],
+                )
+            request.session.cycle_key()
+            request.session.pop(PORTAL_SESSION_KEY, None)
+            request.session[SUPPLIER_ACCOUNT_SESSION_KEY] = str(publisher.public_id)
+            request.session.set_expiry(settings.OFFERWALL_PORTAL_SESSION_TTL_SECONDS)
+            messages.success(
+                request,
+                "Registration submitted. RM Wins will review your supplier account.",
+            )
+            return HttpResponseRedirect(reverse("offerwall:publisher-dashboard"))
+    else:
+        form = SupplierSignupForm()
+    return _no_store(render(request, "offerwall/supplier_signup.html", {"form": form}))
+
+
+def _offerwall_operator(user):
+    return bool(user.is_authenticated and user.is_active and user.is_staff)
+
+
+@user_passes_test(_offerwall_operator, login_url="/login/")
+@require_GET
+def offerwall_operations(request):
+    registrations = PublisherPortalAccount.objects.select_related(
+        "publisher", "user", "reviewed_by"
+    )[:50]
+    publishers = Publisher.objects.select_related("portal_account__user").order_by(
+        "-updated_at"
+    )[:50]
+    payout_requests = PublisherPayoutRequest.objects.select_related(
+        "publisher", "reviewed_by"
+    )[:50]
+    recent_rewards = RewardLedgerEntry.objects.select_related(
+        "publisher", "survey"
+    )[:25]
+    postbacks = PostbackDelivery.objects.select_related("publisher", "click")[:25]
+    context = {
+        "active_page": "offerwall-operations",
+        "registrations": registrations,
+        "publishers": publishers,
+        "payout_requests": payout_requests,
+        "recent_rewards": recent_rewards,
+        "postbacks": postbacks,
+        "operation_counts": {
+            "pending_registrations": PublisherPortalAccount.objects.filter(
+                status=PublisherPortalAccount.Status.PENDING
+            ).count(),
+            "active_publishers": Publisher.objects.filter(is_active=True).count(),
+            "pending_payouts": PublisherPayoutRequest.objects.filter(
+                status__in=(
+                    PublisherPayoutRequest.Status.PENDING,
+                    PublisherPayoutRequest.Status.APPROVED,
+                    PublisherPayoutRequest.Status.PROCESSING,
+                )
+            ).count(),
+            "failed_postbacks": PostbackDelivery.objects.filter(
+                status=PostbackDelivery.Status.FAILED
+            ).count(),
+        },
+    }
+    return _no_store(render(request, "offerwall/operations.html", context))
+
+
+@user_passes_test(_offerwall_operator, login_url="/login/")
+@require_POST
+def offerwall_operations_action(request):
+    action = str(request.POST.get("action") or "").strip()
+    try:
+        if action in {"approve-registration", "reject-registration"}:
+            account = get_object_or_404(
+                PublisherPortalAccount, pk=request.POST.get("registration_id")
+            )
+            status = (
+                PublisherPortalAccount.Status.APPROVED
+                if action == "approve-registration"
+                else PublisherPortalAccount.Status.REJECTED
+            )
+            review_publisher_registration(
+                account,
+                status,
+                reviewer=request.user,
+                admin_note=request.POST.get("admin_note", ""),
+            )
+            messages.success(
+                request,
+                f"{account.publisher.name} registration marked {status}.",
+            )
+        elif action == "toggle-publisher":
+            publisher = get_object_or_404(Publisher, pk=request.POST.get("publisher_id"))
+            publisher.is_active = not publisher.is_active
+            publisher.save(update_fields=["is_active", "updated_at"])
+            messages.success(
+                request,
+                f"{publisher.name} is now {'active' if publisher.is_active else 'inactive'}.",
+            )
+        elif action == "rotate-api-key":
+            publisher = get_object_or_404(Publisher, pk=request.POST.get("publisher_id"))
+            raw_key = publisher.rotate_api_key()
+            publisher.save(
+                update_fields=[
+                    "api_key_hash",
+                    "api_key_prefix",
+                    "api_key_last_four",
+                    "api_key_changed_at",
+                    "api_key_last_used_at",
+                    "updated_at",
+                ]
+            )
+            messages.warning(
+                request,
+                f"Copy this API key now; it is shown once: {raw_key}",
+            )
+        elif action == "rotate-signing-secret":
+            publisher = get_object_or_404(Publisher, pk=request.POST.get("publisher_id"))
+            raw_secret = generate_signing_secret()
+            publisher.set_signing_secret(raw_secret)
+            publisher.save(
+                update_fields=[
+                    "encrypted_signing_secret",
+                    "signing_secret_last_four",
+                    "signing_secret_changed_at",
+                    "updated_at",
+                ]
+            )
+            messages.warning(
+                request,
+                f"Copy this signing secret now; it is shown once: {raw_secret}",
+            )
+        elif action.startswith("payout-"):
+            payout = get_object_or_404(
+                PublisherPayoutRequest, pk=request.POST.get("payout_id")
+            )
+            status_map = {
+                "payout-approve": PublisherPayoutRequest.Status.APPROVED,
+                "payout-process": PublisherPayoutRequest.Status.PROCESSING,
+                "payout-paid": PublisherPayoutRequest.Status.PAID,
+                "payout-reject": PublisherPayoutRequest.Status.REJECTED,
+                "payout-cancel": PublisherPayoutRequest.Status.CANCELED,
+            }
+            if action not in status_map:
+                raise ValidationError("Unknown payout action.")
+            transition_payout(
+                payout,
+                status_map[action],
+                reviewer=request.user,
+                payment_reference=request.POST.get("payment_reference", ""),
+                admin_note=request.POST.get("admin_note", ""),
+            )
+            messages.success(request, f"Payout moved to {status_map[action]}.")
+        elif action == "retry-postback":
+            delivery = get_object_or_404(
+                PostbackDelivery.objects.select_related("publisher"),
+                pk=request.POST.get("postback_id"),
+            )
+            if not delivery.publisher.postback_enabled or not delivery.publisher.callback_url:
+                raise ValidationError("Publisher postbacks are not enabled.")
+            from .tasks import deliver_postback_task
+
+            delivery.status = PostbackDelivery.Status.PENDING
+            delivery.next_attempt_at = None
+            delivery.save(update_fields=["status", "next_attempt_at", "updated_at"])
+            deliver_postback_task.delay(delivery.pk)
+            messages.success(request, "Postback queued for retry.")
+        else:
+            raise ValidationError("Unknown Offerwall operation.")
+    except (ValidationError, ValueError) as exc:
+        message = " ".join(exc.messages) if isinstance(exc, ValidationError) else str(exc)
+        messages.error(request, message)
+    return HttpResponseRedirect(reverse("offerwall:operations"))
 
 
 @require_GET
@@ -295,12 +613,20 @@ def offers_api(request):
 
 def _portal_publisher(request):
     public_id = str(request.session.get(PORTAL_SESSION_KEY) or "").strip()
-    if not public_id:
-        return None
-    publisher = Publisher.objects.filter(public_id=public_id, is_active=True).first()
-    if not publisher:
-        request.session.pop(PORTAL_SESSION_KEY, None)
-    return publisher
+    if public_id:
+        publisher = Publisher.objects.filter(public_id=public_id, is_active=True).first()
+        if not publisher:
+            request.session.pop(PORTAL_SESSION_KEY, None)
+        else:
+            return publisher
+    account = _supplier_account(request)
+    if (
+        account
+        and account.status == PublisherPortalAccount.Status.APPROVED
+        and account.publisher.is_active
+    ):
+        return account.publisher
+    return None
 
 
 @require_GET
@@ -349,6 +675,21 @@ def publisher_access(request, publisher_slug):
 
 @require_GET
 def publisher_dashboard(request):
+    supplier_account = _supplier_account(request)
+    if supplier_account and (
+        supplier_account.status != PublisherPortalAccount.Status.APPROVED
+        or not supplier_account.publisher.is_active
+    ):
+        return _no_store(
+            render(
+                request,
+                "offerwall/supplier_status.html",
+                {
+                    "portal_publisher": supplier_account.publisher,
+                    "supplier_account": supplier_account,
+                },
+            )
+        )
     publisher = _portal_publisher(request)
     if not publisher:
         return _error(
@@ -409,6 +750,7 @@ def publisher_request_withdrawal(request):
 @require_POST
 def publisher_logout(request):
     request.session.pop(PORTAL_SESSION_KEY, None)
+    request.session.pop(SUPPLIER_ACCOUNT_SESSION_KEY, None)
     request.session.cycle_key()
     return _no_store(HttpResponseRedirect(reverse("home")))
 
