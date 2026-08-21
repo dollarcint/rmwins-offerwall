@@ -41,6 +41,7 @@ class OfferOverrideInline(admin.TabularInline):
 class PublisherAdmin(admin.ModelAdmin):
     form = PublisherAdminForm
     list_display = [
+        "publisher_number",
         "name",
         "slug",
         "payout_percent",
@@ -52,8 +53,9 @@ class PublisherAdmin(admin.ModelAdmin):
         "updated_at",
     ]
     list_filter = ["is_active", "postback_enabled", "currency"]
-    search_fields = ["name", "slug"]
+    search_fields = ["name", "slug", "publisher_number", "public_id"]
     readonly_fields = [
+        "publisher_number",
         "public_id",
         "service_user",
         "masked_signing_secret_display",
@@ -68,7 +70,7 @@ class PublisherAdmin(admin.ModelAdmin):
         "updated_at",
     ]
     fieldsets = [
-        ("Publisher", {"fields": ["name", "slug", "public_id", "service_user", "is_active"]}),
+        ("Publisher", {"fields": ["name", "slug", "publisher_number", "public_id", "service_user", "is_active"]}),
         (
             "Commercial",
             {"fields": ["payout_percent", "currency", "wallet_summary_display"]},

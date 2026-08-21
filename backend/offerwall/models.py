@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 from .security import (
@@ -37,6 +37,13 @@ def placement_header_logo_path(instance, filename):
     return _placement_asset_name(instance, filename, "header-logo")
 
 
+class PublisherNumberSequence(models.Model):
+    """Locked counter for gap-independent public publisher numbering."""
+
+    key = models.CharField(max_length=32, primary_key=True, default="publisher", editable=False)
+    next_value = models.PositiveBigIntegerField(default=1, editable=False)
+
+
 class Publisher(models.Model):
     """One external publisher/application embedding the RM Wins offerwall."""
 
@@ -48,6 +55,7 @@ class Publisher(models.Model):
         help_text="Stable public publisher code used in signed wall URLs.",
     )
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    publisher_number = models.PositiveBigIntegerField(unique=True, editable=False)
     service_user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         null=True,
@@ -91,8 +99,8 @@ class Publisher(models.Model):
 
     @property
     def publisher_code(self):
-        """Sequential integration ID backed by the database primary key."""
-        return str(self.pk) if self.pk is not None else ""
+        """Sequential integration ID backed by a dedicated database sequence."""
+        return str(self.publisher_number) if self.publisher_number is not None else ""
 
     @property
     def masked_api_key(self):
@@ -133,6 +141,16 @@ class Publisher(models.Model):
             self.set_signing_secret(generate_signing_secret())
         if not self.api_key_hash:
             self.rotate_api_key()
+        if self._state.adding and self.publisher_number is None:
+            with transaction.atomic():
+                sequence, _ = PublisherNumberSequence.objects.select_for_update().get_or_create(
+                    key="publisher",
+                    defaults={"next_value": 1},
+                )
+                self.publisher_number = sequence.next_value
+                sequence.next_value += 1
+                sequence.save(update_fields=["next_value"])
+                return super().save(*args, **kwargs)
         super().save(*args, **kwargs)
 
 

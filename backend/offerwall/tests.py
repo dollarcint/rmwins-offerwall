@@ -110,6 +110,16 @@ class OfferwallFlowTests(TestCase):
         self.assertGreaterEqual(len(raw_secret), 32)
         self.assertNotEqual(self.publisher.encrypted_signing_secret, raw_secret)
 
+    def test_publisher_codes_use_a_dedicated_sequential_database_number(self):
+        second = Publisher.objects.create(
+            name="Second Publisher",
+            slug="second-publisher",
+        )
+        self.assertEqual(self.publisher.publisher_number, 1)
+        self.assertEqual(self.publisher.publisher_code, "1")
+        self.assertEqual(second.publisher_number, 2)
+        self.assertEqual(second.publisher_code, "2")
+
     def test_signed_entry_creates_canonical_session_and_rejects_tampering(self):
         timestamp = int(timezone.now().timestamp())
         nonce = "publisher_nonce_12345"
@@ -287,7 +297,7 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["code"], 200)
-        self.assertEqual(payload["data"]["query"]["pubid"], str(self.publisher.pk))
+        self.assertEqual(payload["data"]["query"]["pubid"], self.publisher.publisher_code)
         self.assertEqual(payload["data"]["query"]["appid"], placement.app_id)
         self.assertRegex(placement.app_id, r"^RMW_APP_[0-9A-F]{32}$")
         offers = payload["data"]["response"]["offers"]
