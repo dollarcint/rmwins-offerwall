@@ -581,6 +581,8 @@ class OfferwallFlowTests(TestCase):
         self.assertContains(settings_page, "Copy Code")
         self.assertContains(settings_page, f"embed/app/{placement.app_id}/")
         self.assertContains(settings_page, "embed.js?v=1")
+        self.assertContains(settings_page, "Preview Direct iFrame")
+        self.assertContains(settings_page, "RM Wins Offer Wall preview")
         self.assertNotContains(settings_page, "clipboard-write")
 
     def test_supplier_can_configure_all_placement_settings(self):

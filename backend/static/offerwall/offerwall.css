@@ -4806,6 +4806,31 @@ a {
   font-size: 8px;
   line-height: 1.7;
 }
+.ow-iframe-preview {
+  margin-top: 18px;
+  border: 1px solid #dfe4eb;
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+.ow-iframe-preview summary {
+  padding: 14px 16px;
+  color: #26364d;
+  background: #f7f9fc;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+}
+.ow-iframe-preview > div {
+  padding: 12px;
+}
+.ow-iframe-preview iframe {
+  display: block;
+  min-height: 600px;
+  border: 0;
+  border-radius: 8px;
+  background: #f5f7fb;
+}
 .ow-ou-api-details {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
