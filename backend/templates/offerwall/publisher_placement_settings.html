@@ -109,13 +109,13 @@ const calculatedHash = crypto
     <p class="ow-ou-jump-help">Click any option above to quickly jump to that integration method</p>
 
     <section class="ow-ou-doc-section" id="api-integration"><h3>API Key &amp; Details</h3>
-      <div class="ow-ou-api-details"><p><span>Publisher ID:</span><code id="publisher-id">{{ portal_publisher.public_id }}</code></p><p><span>API:</span><b>{% if placement.api_key_plain %}ON{% else %}OFF{% endif %}</b></p><p><span>API Base URL:</span><em>GET</em><code id="api-base">{{ placement.api_url }}?</code></p><p><span>App ID:</span><code id="app-id">{{ placement.app_id }}</code></p><p><span>API key:</span><code id="api-key">{{ placement.api_key_plain|default:'No api key found!' }}</code></p></div>
+      <div class="ow-ou-api-details"><p><span>Publisher ID:</span><code id="publisher-id">{{ portal_publisher.publisher_code }}</code></p><p><span>API:</span><b>{% if placement.api_key_plain %}ON{% else %}OFF{% endif %}</b></p><p><span>API Base URL:</span><em>GET</em><code id="api-base">{{ placement.api_url }}?</code></p><p><span>App ID:</span><code id="app-id">{{ placement.app_id }}</code></p><p><span>API key:</span><code id="api-key">{{ placement.api_key_plain|default:'No api key found!' }}</code></p></div>
       <form method="post" action="{% url 'offerwall:publisher-placement-action' placement.public_id %}" onsubmit="return confirm('Generating a new API key will invalidate the current key. Continue?');">{% csrf_token %}<input type="hidden" name="action" value="rotate-api-key"><button class="ow-ou-orange-button">{% if placement.api_key_plain %}Generate New API Key{% else %}Request API Key{% endif %}</button></form><p class="ow-ou-warning">Warning: Generating a new API key will render your current key invalid</p>
       <h4>Use Cases</h4><p>The RM Wins Offers API supports fetching real-time offers, asynchronously caching inventory, and retrieving offers for a placement.</p>
       <h4>Request Query Params</h4><p>The Offers API accepts a GET request with these query params:</p>
       <div class="ow-ou-param-list">
         <article><code>key</code><b>REQUIRED</b><span>Data type: string</span><p>Your account's API Key.</p></article>
-        <article><code>pubid</code><b>REQUIRED</b><span>Data type: string</span><p>Your unique publisher ID. Example: {{ portal_publisher.public_id }}</p></article>
+        <article><code>pubid</code><b>REQUIRED</b><span>Data type: integer</span><p>Your sequential RM Wins publisher ID. Example: {{ portal_publisher.publisher_code }}</p></article>
         <article><code>app_id</code><b>REQUIRED</b><span>Data type: string</span><p>The unique identifier for this placement.</p></article>
         <article><code>platform</code><b>OPTIONAL</b><span>Data type: string</span><p>Valid values: iPhone, Android, All. Default: All.</p></article>
         <article><code>country</code><b>OPTIONAL</b><span>Data type: string</span><p>User country ISO code or All. Default: All.</p></article>
@@ -125,7 +125,7 @@ const calculatedHash = crypto
       <h4>Route Response Data</h4><p>200 means success; 400 contains a message describing the invalid request.</p>
       <div class="ow-code-panel"><div><h3>Live Survey Example Response</h3><button type="button" data-copy-target="api-response">Copy JSON</button></div><textarea id="api-response" rows="17" readonly>{
   "message": "success", "type": 1, "code": 200,
-  "data": { "query": { "pubid": "{{ portal_publisher.public_id }}", "appid": "{{ placement.app_id }}", "country": "All", "platform": "All" },
+  "data": { "query": { "pubid": "{{ portal_publisher.publisher_code }}", "appid": "{{ placement.app_id }}", "country": "All", "platform": "All" },
   "response": { "currency_name": "{{ placement.currency_name }}", "offers": [{
     "offer_id": "survey_id", "offer_name": "Survey title",
     "traffic_type": "{{ placement.traffic_type }}",

@@ -274,7 +274,7 @@ class OfferwallFlowTests(TestCase):
             website_url="https://api-site.example.test",
         )
         query = {
-            "pubid": str(self.publisher.public_id),
+            "pubid": self.publisher.publisher_code,
             "app_id": placement.app_id,
         }
         unauthorized = self.client.get(reverse("offerwall:offers-api"), query)
@@ -287,7 +287,9 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["code"], 200)
+        self.assertEqual(payload["data"]["query"]["pubid"], str(self.publisher.pk))
         self.assertEqual(payload["data"]["query"]["appid"], placement.app_id)
+        self.assertRegex(placement.app_id, r"^RMW_APP_[0-9A-F]{32}$")
         offers = payload["data"]["response"]["offers"]
         self.assertEqual(len(offers), 1)
         parsed = urlsplit(offers[0]["offer_url_easy"])
@@ -676,7 +678,7 @@ class OfferwallFlowTests(TestCase):
         response = self.client.get(
             reverse("offerwall:offers-api"),
             {
-                "pubid": str(self.publisher.public_id),
+                "pubid": self.publisher.publisher_code,
                 "app_id": placement.app_id,
             },
             HTTP_AUTHORIZATION=f"Bearer {self.api_key}",

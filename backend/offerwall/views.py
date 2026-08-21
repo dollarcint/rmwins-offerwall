@@ -84,6 +84,7 @@ from .wallet import request_withdrawal, transition_payout, wallet_summary
 
 
 USER_ID_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,160}$")
+APP_ID_RE = re.compile(r"^(?:RMW_APP_|ID_)([0-9a-fA-F]{32})$")
 PORTAL_SESSION_KEY = "offerwall_publisher_id"
 SUPPLIER_ACCOUNT_SESSION_KEY = "offerwall_supplier_publisher_id"
 
@@ -665,9 +666,10 @@ def _placement_from_app_id(publisher, app_id):
     value = str(app_id or "").strip()
     if not value:
         return None
-    if not re.fullmatch(r"ID_[0-9a-fA-F]{32}", value):
+    match = APP_ID_RE.fullmatch(value)
+    if not match:
         raise ValueError("Invalid app_id.")
-    placement_uuid = uuid.UUID(hex=value[3:])
+    placement_uuid = uuid.UUID(hex=match.group(1))
     placement = PublisherPlacement.objects.filter(
         publisher=publisher,
         public_id=placement_uuid,
@@ -690,7 +692,7 @@ def offers_api(request):
             )
         )
     pubid = str(request.GET.get("pubid") or "").strip()
-    if pubid != str(publisher.public_id):
+    if pubid not in {publisher.publisher_code, str(publisher.public_id)}:
         return _no_store(
             JsonResponse(
                 {"message": "A valid pubid is required.", "type": 0, "code": 400},
@@ -784,11 +786,12 @@ def offers_api(request):
 @require_GET
 def offer_click_tracking(request):
     app_id = str(request.GET.get("app_id") or "").strip()
-    if not re.fullmatch(r"ID_[0-9a-fA-F]{32}", app_id):
+    match = APP_ID_RE.fullmatch(app_id)
+    if not match:
         return _error(request, "Invalid placement", "A valid app_id is required.")
     placement = get_object_or_404(
         PublisherPlacement.objects.select_related("publisher"),
-        public_id=uuid.UUID(hex=app_id[3:]),
+        public_id=uuid.UUID(hex=match.group(1)),
         status=PublisherPlacement.Status.ACTIVE,
         publisher__is_active=True,
     )
@@ -932,7 +935,7 @@ def _placement_embed_details(request, placement):
     placement.direct_url = iframe_url
     placement.api_url = api_url
     placement.api_example_url = (
-        f"{api_url}?key={{API_KEY}}&pubid={placement.publisher.public_id}"
+        f"{api_url}?key={{API_KEY}}&pubid={placement.publisher.publisher_code}"
         f"&app_id={placement.app_id}&platform=All&country=All&type=live_surveys"
     )
     placement.iframe_code = (

@@ -90,6 +90,11 @@ class Publisher(models.Model):
         return f"{self.name} ({self.slug})"
 
     @property
+    def publisher_code(self):
+        """Sequential integration ID backed by the database primary key."""
+        return str(self.pk) if self.pk is not None else ""
+
+    @property
     def masked_api_key(self):
         return (
             f"{self.api_key_prefix}••••{self.api_key_last_four}"
@@ -355,8 +360,8 @@ class PublisherPlacement(models.Model):
 
     @property
     def app_id(self):
-        """Stable OpinionUniverse-style identifier shown to the supplier."""
-        return f"ID_{self.public_id.hex}"
+        """Stable RM Wins placement identifier shown to the supplier."""
+        return f"RMW_APP_{self.public_id.hex.upper()}"
 
     @property
     def allowed_domain_list(self):
