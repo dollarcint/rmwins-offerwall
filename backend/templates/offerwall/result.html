@@ -1,0 +1,18 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}{{ title }} · RM Wins Offerwall{% endblock %}
+{% block content %}
+<section class="ow-result-shell">
+  <article class="ow-result-card {{ state }}">
+    <div class="ow-result-icon" aria-hidden="true">{% if state == 'success' %}✓{% elif state == 'no-credit' %}×{% else %}…{% endif %}</div>
+    <span class="ow-eyebrow"><i></i> Survey result</span>
+    <h1>{{ title }}</h1><p>{{ message }}</p>
+    <dl>
+      <div><dt>Offer</dt><dd>{{ click.survey.name|default:click.survey.local_id }}</dd></div>
+      <div><dt>Status</dt><dd>{{ click.attempt.get_status_display }}</dd></div>
+      {% if credit %}<div><dt>Credited reward</dt><dd>{{ credit.currency }} {{ credit.amount|floatformat:2 }}</dd></div>{% endif %}
+      <div><dt>Click ID</dt><dd class="mono">{{ click.public_id }}</dd></div>
+    </dl>
+    {% if wall_url %}<a class="ow-button primary wide" href="{{ wall_url }}">View more surveys</a>{% endif %}
+  </article>
+</section>
+{% endblock %}

@@ -72,6 +72,32 @@ AUTH_LOGIN_WINDOW_SECONDS = max(
     1,
     int(os.getenv("AUTH_LOGIN_WINDOW_SECONDS", "300")),
 )
+OFFERWALL_ENABLED = env_bool("OFFERWALL_ENABLED", True)
+OFFERWALL_PUBLIC_BASE_URL = os.getenv(
+    "OFFERWALL_PUBLIC_BASE_URL", PUBLIC_APP_BASE_URL
+).strip().rstrip("/")
+OFFERWALL_ENTRY_TTL_SECONDS = max(
+    60, int(os.getenv("OFFERWALL_ENTRY_TTL_SECONDS", "900"))
+)
+OFFERWALL_ENTRY_FUTURE_SKEW_SECONDS = max(
+    0, int(os.getenv("OFFERWALL_ENTRY_FUTURE_SKEW_SECONDS", "60"))
+)
+OFFERWALL_VISIT_TTL_SECONDS = max(
+    OFFERWALL_ENTRY_TTL_SECONDS,
+    int(os.getenv("OFFERWALL_VISIT_TTL_SECONDS", "7200")),
+)
+OFFERWALL_ENTRY_RATE_LIMIT_PER_MINUTE = max(
+    1, int(os.getenv("OFFERWALL_ENTRY_RATE_LIMIT_PER_MINUTE", "60"))
+)
+OFFERWALL_API_RATE_LIMIT_PER_MINUTE = max(
+    1, int(os.getenv("OFFERWALL_API_RATE_LIMIT_PER_MINUTE", "120"))
+)
+OFFERWALL_POSTBACK_TIMEOUT_SECONDS = max(
+    1, int(os.getenv("OFFERWALL_POSTBACK_TIMEOUT_SECONDS", "10"))
+)
+OFFERWALL_POSTBACK_MAX_ATTEMPTS = max(
+    1, int(os.getenv("OFFERWALL_POSTBACK_MAX_ATTEMPTS", "6"))
+)
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -87,6 +113,7 @@ INSTALLED_APPS = [
     "vendors.apps.VendorsConfig",
     "surveys",
     "prescreener_vault.apps.PrescreenerVaultConfig",
+    "offerwall.apps.OfferwallConfig",
 ]
 
 MIDDLEWARE = [
@@ -396,6 +423,7 @@ SPECTACULAR_SETTINGS = {
         {"name": "RFG APIs", "description": "Every documented Research For Good LiveAlert command using server-generated HMAC authentication."},
         {"name": "RFG Callbacks", "description": "Research For Good callback contract and safe result-code interpretation tools."},
         {"name": "Cint Exchange APIs", "description": "Cint Model 2 Method B inventory, allocation, qualification, quota and question-library reads using server-side credentials."},
+        {"name": "Offerwall", "description": "Signed publisher sessions, eligible inventory, verified credits and postback delivery."},
     ],
     "ENUM_NAME_OVERRIDES": {
         "SurveyStatusEnum": "surveys.models.Survey.Status",

@@ -22,7 +22,7 @@ function getDashboardBaseUrl() {
     return new URL(legacyLoginUrl, window.location.origin).origin;
   }
 
-  return import.meta.env.DEV ? 'http://127.0.0.1:8000' : 'https://api.rmwinsights.com';
+  return import.meta.env.DEV ? 'http://127.0.0.1:8000' : window.location.origin;
 }
 
 function getSafeNextUrl(dashboardBaseUrl: string) {
@@ -130,15 +130,15 @@ export default function LoginPage() {
         <div className="absolute -bottom-32 right-0 h-96 w-96 rounded-full bg-sky-300/10 blur-3xl" />
 
         <a href="/" className="relative z-10 inline-flex items-center gap-3 text-lg font-semibold">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-white text-sm font-bold text-brand-900">AS</span>
-          Enligne Surveys
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-white text-sm font-bold text-brand-900">RW</span>
+          RM Wins Offerwall
         </a>
 
         <div className="relative z-10 max-w-xl">
-          <p className="mb-5 text-sm font-semibold uppercase tracking-[0.2em] text-sky-200">Research workspace</p>
-          <h1 className="text-5xl font-semibold leading-tight tracking-tight">Your survey operations, all in one secure workspace.</h1>
+          <p className="mb-5 text-sm font-semibold uppercase tracking-[0.2em] text-sky-200">Offerwall operations</p>
+          <h1 className="text-5xl font-semibold leading-tight tracking-tight">Secure inventory, verified rewards and publisher delivery.</h1>
           <p className="mt-6 max-w-lg text-lg leading-relaxed text-slate-300">
-            Manage projects, survey inventory, respondent activity and team access from a single dashboard.
+            Manage publishers, live offers, respondent journeys, rewards and signed postbacks from one workspace.
           </p>
         </div>
 
@@ -151,7 +151,7 @@ export default function LoginPage() {
       <section className="flex min-h-screen items-center justify-center px-5 py-10 sm:px-10">
         <div className="w-full max-w-md">
           <a href="/" className="mb-10 inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition-colors hover:text-brand-700 lg:hidden">
-            <ArrowLeft size={16} /> Back to Enligne Surveys
+            <ArrowLeft size={16} /> Back to RM Wins Offerwall
           </a>
 
           <div className="mb-8">

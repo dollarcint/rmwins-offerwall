@@ -1011,6 +1011,10 @@ def termination_reasons_export(request):
 
 def workspace_home(request):
     if not request.user.is_authenticated:
+        if getattr(settings, "OFFERWALL_ENABLED", False):
+            from offerwall.views import landing
+
+            return landing(request)
         from django.contrib.auth.views import redirect_to_login
         return redirect_to_login(request.get_full_path())
     codes = effective_permission_codes(request.user)
@@ -2498,6 +2502,14 @@ def _respondent_result_redirect(attempt):
         response = HttpResponseRedirect(supplier_url)
         response["Cache-Control"] = "no-store"
         return response
+    if getattr(settings, "OFFERWALL_ENABLED", False):
+        from offerwall.services import result_url_for_attempt
+
+        offerwall_url = result_url_for_attempt(attempt)
+        if offerwall_url:
+            response = HttpResponseRedirect(offerwall_url)
+            response["Cache-Control"] = "no-store"
+            return response
     result_base_url = settings.PUBLIC_RESULT_BASE_URL or settings.PUBLIC_APP_BASE_URL
     if not result_base_url:
         result_base_url = "https://www.rmwinsights.com"
@@ -2734,6 +2746,14 @@ def survey_status(request):
         status_label = "Unknown attempt"
 
     if attempt and attempt.status in STATUS_PAGES:
+        if getattr(settings, "OFFERWALL_ENABLED", False):
+            from offerwall.services import result_url_for_attempt
+
+            offerwall_url = result_url_for_attempt(attempt)
+            if offerwall_url:
+                response = HttpResponseRedirect(offerwall_url)
+                response["Cache-Control"] = "no-store"
+                return response
         from vendors.supplier_delivery import supplier_outcome_redirect
 
         supplier_url = supplier_outcome_redirect(attempt)

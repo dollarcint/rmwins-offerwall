@@ -1,0 +1,27 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="RM Wins secure survey offerwall">
+  <title>{% block title %}RM Wins Offerwall{% endblock %}</title>
+  {% include 'includes/favicon_links.html' %}
+  <link rel="stylesheet" href="{% static 'offerwall/offerwall.css' %}?v=1">
+</head>
+<body>
+  <header class="ow-topbar">
+    <a class="ow-brand" href="/" aria-label="RM Wins Offerwall home">
+      <span class="ow-brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <span><strong>RM Wins</strong><small>Offerwall</small></span>
+    </a>
+    <span class="ow-secure"><i aria-hidden="true"></i> Secure survey marketplace</span>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+  <footer class="ow-footer">
+    <span>© {% now "Y" %} RM Wins Insights</span>
+    <span>Signed sessions · Verified rewards · Private tracking</span>
+  </footer>
+</body>
+</html>

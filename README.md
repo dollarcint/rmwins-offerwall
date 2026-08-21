@@ -1,24 +1,21 @@
-# Enligne Surveys monorepo
+# RM Wins Offerwall
 
-This repository contains the public React website and the authenticated Django research dashboard.
+Independent publisher offerwall built from the RM Wins survey platform. It keeps the existing
+survey-provider lifecycle while adding signed publisher sessions, eligible inventory, immutable
+click attribution, verified-only rewards and signed server-to-server postbacks.
 
-## Structure
+Production: `https://offerwall.rmwinsights.com`
 
-- `frontend/` — React + Vite marketing website.
-- `backend/` — Django survey inventory and branded authentication.
-- `render.yaml` — Render Blueprint for both services and PostgreSQL.
+## Applications
+
+- `backend/` — Django admin, survey inventory, provider callbacks and the Offerwall application.
+- `frontend/` — React/Vite staff login surface.
+- `deploy/offerwall-cyberpanel/` — isolated VPS runtime assets for this repository only.
+
+The production Offerwall uses dedicated PostgreSQL databases, Redis instances and loopback
+application ports. It does not share application state with the main RM Wins deployment.
 
 ## Local development
-
-Frontend:
-
-```powershell
-cd frontend
-npm ci
-npm run dev
-```
-
-Backend:
 
 ```powershell
 cd backend
@@ -29,14 +26,50 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-Copy `frontend/.env.example` to `frontend/.env.local` when a different dashboard login URL is needed locally.
+```powershell
+cd frontend
+npm ci
+npm run dev
+```
 
-## Deployment
+Copy `backend/.env.example` to `backend/.env` for local-only values. Never commit real provider,
+publisher, encryption or database credentials.
 
-Production uses one CyberPanel VPS and one public IP with two isolated website users:
+## Publisher setup
 
-- `alessarsolutions.in`: React static build owned by the frontend website user.
-- `api.alessarsolutions.in`: Django, Gunicorn and Celery owned by the backend website user.
-- OpenLiteSpeed, MySQL/MariaDB and Redis are shared server services.
+1. Open Django Admin and create an **Offerwall publisher**.
+2. Copy the one-time signing secret and inventory API key shown after save.
+3. Keep all live eligible surveys assigned by default. Add an Offer Override only to exclude,
+   feature, rename or change the payout percentage for a particular survey.
+4. Generate a test link from the publisher admin page or with:
 
-Follow [the complete CyberPanel runbook](deploy/cyberpanel/README.md). Supplier credentials and production environment files must never be committed to Git. The repository-level `render.yaml` remains available as an optional Render deployment.
+```powershell
+python manage.py generate_offerwall_link publisher-slug external-user-id
+```
+
+The wall only credits a completion after the existing survey callback flow marks the attempt as
+verified. A publisher/user/survey combination can receive one credit. Subsequent saves and callback
+retries are idempotent.
+
+See [Publisher integration](docs/OFFERWALL_INTEGRATION.md) for the signed URL, inventory API and
+postback contract.
+
+## Validation
+
+```powershell
+cd backend
+python manage.py test
+python manage.py check --deploy
+python manage.py makemigrations --check --dry-run
+
+cd ..\frontend
+npm ci
+npm run typecheck
+npm run lint
+npm run build
+npm audit --omit=dev
+```
+
+Production releases are immutable snapshots created from an exact Git commit. Do not `git pull`
+inside the VPS application directory; use the protected Offerwall deployment wrapper and verify
+the public site after migration and service restart.

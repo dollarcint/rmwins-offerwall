@@ -1,0 +1,72 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}Available surveys · {{ publisher.name }}{% endblock %}
+{% block content %}
+<section class="ow-wall-shell">
+  <header class="ow-wall-heading">
+    <div>
+      <span class="ow-eyebrow"><i></i> {{ publisher.name }}</span>
+      <h1>Available surveys</h1>
+      <p>Choose the opportunity that fits you best. Rewards are confirmed after provider verification.</p>
+    </div>
+    <div class="ow-session-pill"><span>{{ offer_count }}</span> live offer{{ offer_count|pluralize }}</div>
+  </header>
+  {% if offers %}
+  <div class="ow-offer-toolbar">
+    <label><span class="sr-only">Search offers</span><input id="offerSearch" type="search" placeholder="Search surveys or categories" autocomplete="off"></label>
+    <select id="offerSort" aria-label="Sort offers">
+      <option value="recommended">Recommended</option>
+      <option value="reward">Highest reward</option>
+      <option value="loi">Shortest first</option>
+    </select>
+  </div>
+  <div class="ow-offer-grid" id="offerGrid">
+    {% for offer in offers %}<article class="ow-offer-card{% if offer.featured %} featured{% endif %}" data-title="{{ offer.title|lower }} {{ offer.survey_type|lower }} {{ offer.client|lower }}" data-reward="{{ offer.reward|default:0 }}" data-loi="{{ offer.loi|default:99999 }}">
+      <header>
+        <div class="ow-offer-icon" aria-hidden="true">{% if offer.survey_type %}{{ offer.survey_type|slice:':2'|upper }}{% else %}SW{% endif %}</div>
+        {% if offer.featured %}<span class="ow-featured">Featured</span>{% endif %}
+      </header>
+      <h2>{{ offer.title }}</h2>
+      <p class="ow-offer-client">{{ offer.client }}</p>
+      <div class="ow-offer-meta">
+        <span><small>Reward</small><strong>{{ offer.currency }} {{ offer.reward|floatformat:2 }}</strong></span>
+        <span><small>Time</small><strong>{% if offer.loi %}{{ offer.loi }} min{% else %}Flexible{% endif %}</strong></span>
+        <span><small>Match</small><strong>{% if offer.incidence_rate %}{{ offer.incidence_rate|floatformat:0 }}%{% else %}Open{% endif %}</strong></span>
+      </div>
+      <div class="ow-offer-tags">
+        {% if offer.country %}<span>{{ offer.country }}</span>{% endif %}
+        {% if offer.device %}<span>{{ offer.device }}</span>{% endif %}
+        {% if offer.survey_type %}<span>{{ offer.survey_type }}</span>{% endif %}
+      </div>
+      <a class="ow-start" href="{{ offer.click_url }}">Start survey <span aria-hidden="true">→</span></a>
+    </article>{% endfor %}
+  </div>
+  <p class="ow-no-results" id="noResults" hidden>No survey matches this search.</p>
+  {% else %}
+  <section class="ow-empty">
+    <span aria-hidden="true">⌛</span><h2>No eligible surveys right now</h2>
+    <p>Inventory changes throughout the day. Please request a fresh link later.</p>
+  </section>
+  {% endif %}
+</section>
+{% if offers %}<script>
+(() => {
+  const search = document.getElementById('offerSearch');
+  const sort = document.getElementById('offerSort');
+  const grid = document.getElementById('offerGrid');
+  const empty = document.getElementById('noResults');
+  const cards = Array.from(grid.children);
+  const refresh = () => {
+    const query = search.value.trim().toLowerCase();
+    cards.forEach(card => { card.hidden = query && !card.dataset.title.includes(query); });
+    const visible = cards.filter(card => !card.hidden);
+    if (sort.value === 'reward') visible.sort((a,b) => Number(b.dataset.reward) - Number(a.dataset.reward));
+    if (sort.value === 'loi') visible.sort((a,b) => Number(a.dataset.loi) - Number(b.dataset.loi));
+    if (sort.value === 'recommended') visible.sort((a,b) => cards.indexOf(a) - cards.indexOf(b));
+    visible.forEach(card => grid.appendChild(card));
+    empty.hidden = visible.length > 0;
+  };
+  search.addEventListener('input', refresh);
+  sort.addEventListener('change', refresh);
+})();
+</script>{% endif %}
+{% endblock %}
