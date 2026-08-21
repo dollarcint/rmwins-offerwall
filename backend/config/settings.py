@@ -1,6 +1,7 @@
 """Environment-driven Django, database, cache, provider and task configuration."""
 
 import os
+from decimal import Decimal
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -97,6 +98,15 @@ OFFERWALL_POSTBACK_TIMEOUT_SECONDS = max(
 )
 OFFERWALL_POSTBACK_MAX_ATTEMPTS = max(
     1, int(os.getenv("OFFERWALL_POSTBACK_MAX_ATTEMPTS", "6"))
+)
+OFFERWALL_PORTAL_LINK_TTL_SECONDS = max(
+    60, int(os.getenv("OFFERWALL_PORTAL_LINK_TTL_SECONDS", "900"))
+)
+OFFERWALL_PORTAL_SESSION_TTL_SECONDS = max(
+    900, int(os.getenv("OFFERWALL_PORTAL_SESSION_TTL_SECONDS", "43200"))
+)
+OFFERWALL_MINIMUM_PAYOUT = max(
+    Decimal("0.01"), Decimal(os.getenv("OFFERWALL_MINIMUM_PAYOUT", "50.00"))
 )
 INSTALLED_APPS = [
     "django.contrib.admin",

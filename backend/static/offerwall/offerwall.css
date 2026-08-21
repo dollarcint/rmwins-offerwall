@@ -648,3 +648,277 @@ a {
     text-align: left;
   }
 }
+
+.ow-portal-nav {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+.ow-portal-nav form {
+  margin: 0;
+}
+.ow-portal-nav button {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  padding: 0 13px;
+  cursor: pointer;
+  font-weight: 750;
+}
+.ow-messages {
+  width: min(1124px, calc(100% - 32px));
+  margin: 18px auto 0;
+}
+.ow-messages div {
+  padding: 13px 16px;
+  border: 1px solid #bbd7ff;
+  border-radius: 13px;
+  background: #edf5ff;
+  color: #174d96;
+  font-size: 13px;
+}
+.ow-messages .success {
+  border-color: #a8e0ca;
+  background: #eaf8f2;
+  color: #087653;
+}
+.ow-messages .error {
+  border-color: #f1bbc3;
+  background: #fff0f2;
+  color: #a62d40;
+}
+.ow-publisher-shell {
+  max-width: 1180px;
+  margin: 34px auto 0;
+  padding: 0 28px;
+}
+.ow-publisher-heading {
+  padding: 35px 40px;
+  border-radius: 26px;
+  background: linear-gradient(135deg, #102343, #164e85);
+  color: #fff;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+.ow-publisher-heading h1 {
+  margin: 12px 0 5px;
+  font-size: 36px;
+  letter-spacing: -1.2px;
+}
+.ow-publisher-heading p {
+  margin: 0;
+  color: #c7d5e8;
+}
+.ow-publisher-heading .ow-session-pill strong {
+  margin-left: 5px;
+}
+.ow-wallet-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0 14px;
+}
+.ow-wallet-grid article {
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+  display: grid;
+  gap: 7px;
+}
+.ow-wallet-grid article.primary {
+  border-color: #a7dce5;
+  background: linear-gradient(145deg, #102e56, #126c7d);
+  color: #fff;
+}
+.ow-wallet-grid small {
+  color: #8090a6;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: 850;
+}
+.ow-wallet-grid .primary small,
+.ow-wallet-grid .primary span {
+  color: #b9dce3;
+}
+.ow-wallet-grid strong {
+  font-size: 24px;
+  letter-spacing: -0.7px;
+}
+.ow-wallet-grid span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.ow-publisher-stats {
+  display: flex;
+  gap: 7px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.ow-publisher-stats span {
+  padding: 9px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 11px;
+}
+.ow-publisher-stats strong {
+  color: var(--ink);
+  margin-right: 4px;
+}
+.ow-publisher-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.75fr);
+  gap: 14px;
+}
+.ow-panel {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: #fff;
+  overflow: hidden;
+}
+.ow-panel > header {
+  padding: 20px 22px 14px;
+}
+.ow-panel h2 {
+  margin: 9px 0 0;
+  font-size: 18px;
+}
+.ow-table-wrap {
+  overflow-x: auto;
+}
+.ow-panel table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.ow-panel th,
+.ow-panel td {
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+.ow-panel th {
+  color: #8996a9;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.ow-money {
+  color: var(--green);
+  font-weight: 850;
+}
+.ow-money.negative {
+  color: var(--red);
+}
+.ow-status {
+  display: inline-flex;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #edf4ff;
+  color: #195bb7;
+  font-size: 9px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+.ow-status.credit,
+.ow-status.paid,
+.ow-status.approved {
+  background: #e7f8f1;
+  color: #087654;
+}
+.ow-status.reversal,
+.ow-status.rejected,
+.ow-status.canceled {
+  background: #fff0f2;
+  color: #ab3043;
+}
+.ow-table-empty {
+  padding: 38px !important;
+  text-align: center !important;
+  color: var(--muted);
+}
+.ow-withdrawal-panel > p {
+  margin: -5px 22px 17px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.ow-withdrawal-form {
+  padding: 0 22px 22px;
+  display: grid;
+  gap: 13px;
+}
+.ow-withdrawal-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+.ow-withdrawal-form input,
+.ow-withdrawal-form select,
+.ow-withdrawal-form textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #f9fbfd;
+  color: var(--ink);
+  padding: 11px 12px;
+  font: inherit;
+  font-size: 12px;
+  resize: vertical;
+}
+.ow-withdrawal-form input:focus,
+.ow-withdrawal-form select:focus,
+.ow-withdrawal-form textarea:focus {
+  outline: 0;
+  border-color: #6aa4ff;
+  box-shadow: 0 0 0 4px rgba(20, 93, 255, 0.08);
+}
+.ow-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  transform: none;
+}
+.ow-payout-history {
+  margin-top: 14px;
+}
+@media (max-width: 900px) {
+  .ow-wallet-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ow-publisher-layout {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 620px) {
+  .ow-portal-nav > span {
+    display: none;
+  }
+  .ow-publisher-shell {
+    margin-top: 18px;
+    padding: 0 14px;
+  }
+  .ow-publisher-heading {
+    padding: 27px 22px;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .ow-publisher-heading h1 {
+    font-size: 30px;
+  }
+  .ow-wallet-grid {
+    grid-template-columns: 1fr;
+  }
+}

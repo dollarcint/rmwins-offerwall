@@ -44,6 +44,24 @@ X-Offerwall-Key: ow_live_...
 The response contains publisher details, session expiry, a signed wall URL and currently eligible
 offers with signed click URLs. API keys must only be used server-to-server.
 
+The same API key can read the publisher wallet and latest payout requests:
+
+```text
+GET https://offerwall.rmwinsights.com/api/v1/offerwall/wallet/
+X-Offerwall-Key: ow_live_...
+```
+
+## Publisher dashboard and payouts
+
+Django Admin generates a short-lived, one-time publisher dashboard link. Opening it exchanges the
+signed URL for a secure server-side session and redirects to a clean `/publisher/` URL. The portal
+shows available balance, net earnings, reserved withdrawals, paid withdrawals, traffic counts,
+reward ledger and payout history.
+
+A payout request reserves its amount immediately. Rejected or canceled requests release the
+reserve; paid requests remain deducted. RM Wins staff control the state transition in Django Admin:
+pending → approved → processing → paid. Marking a payout paid requires a payment reference.
+
 ## Outcome postback
 
 When postbacks are enabled for a publisher, RM Wins sends JSON to its configured HTTPS callback.

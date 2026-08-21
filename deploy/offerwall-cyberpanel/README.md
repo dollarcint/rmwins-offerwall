@@ -56,7 +56,8 @@ Alessar service states are checked before and after deployment.
 4. Install `nginx-offerwall-https.conf`, run `nginx -t`, reload, and only
    then enable Django SSL redirect/HSTS in the protected Offerwall environment.
 
-The public root is the authenticated Django workspace. Unauthenticated visitors
-are redirected to the React login page. React also renders the survey-result
-page; all APIs, callbacks, admin and workspace pages are served by the isolated
+The public root is the Offerwall landing page. Respondents enter inventory through
+signed publisher wall links, and publishers exchange a one-time signed link for a
+private wallet session. React serves only the staff login surface; Offerwall pages,
+survey callbacks, APIs, admin and workspace pages are served by the isolated Django
 backend. The historical `/setup/` route hands off to Django Admin.

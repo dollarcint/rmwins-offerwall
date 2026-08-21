@@ -2,7 +2,8 @@
 
 Independent publisher offerwall built from the RM Wins survey platform. It keeps the existing
 survey-provider lifecycle while adding signed publisher sessions, eligible inventory, immutable
-click attribution, verified-only rewards and signed server-to-server postbacks.
+click attribution, verified-only rewards, publisher wallets, withdrawal requests and signed
+server-to-server postbacks.
 
 Production: `https://offerwall.rmwinsights.com`
 
@@ -45,11 +46,17 @@ publisher, encryption or database credentials.
 
 ```powershell
 python manage.py generate_offerwall_link publisher-slug external-user-id
+python manage.py generate_publisher_portal_link publisher-slug
 ```
 
 The wall only credits a completion after the existing survey callback flow marks the attempt as
 verified. A publisher/user/survey combination can receive one credit. Subsequent saves and callback
 retries are idempotent.
+
+The same publisher admin page generates a one-time signed dashboard link. The publisher can view
+its available/reserved/paid balance, reward ledger and withdrawal history, then submit a payout
+request. Staff approve, process, reject or mark payouts paid from Django Admin; a payment reference
+is mandatory for the paid transition.
 
 See [Publisher integration](docs/OFFERWALL_INTEGRATION.md) for the signed URL, inventory API and
 postback contract.

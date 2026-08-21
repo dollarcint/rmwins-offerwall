@@ -5,20 +5,29 @@ from datetime import datetime, timezone as datetime_timezone
 from decimal import Decimal
 
 from django.conf import settings
+from django.contrib import messages
 from django.core.cache import caches
+from django.core.exceptions import ValidationError
+from django.db.models import Count, Q
 from django.http import HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 
 from surveys.models import Survey, SurveyAttempt
 
-from .models import OfferClick, Publisher, RewardLedgerEntry, WallVisit
+from .models import (
+    OfferClick,
+    Publisher,
+    RewardLedgerEntry,
+    WallVisit,
+)
 from .security import (
     digest_api_key,
     verify_click_signature,
     verify_entry_signature,
+    verify_portal_access,
     verify_result_signature,
     verify_session_signature,
 )
@@ -31,9 +40,11 @@ from .services import (
     result_url,
     session_url,
 )
+from .wallet import request_withdrawal, wallet_summary
 
 
 USER_ID_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,160}$")
+PORTAL_SESSION_KEY = "offerwall_publisher_id"
 
 
 def _no_store(response):
@@ -277,6 +288,160 @@ def offers_api(request):
                 "session_url": session_url(visit),
                 "expires_at": visit.expires_at.isoformat(),
                 "offers": response_offers,
+            }
+        )
+    )
+
+
+def _portal_publisher(request):
+    public_id = str(request.session.get(PORTAL_SESSION_KEY) or "").strip()
+    if not public_id:
+        return None
+    publisher = Publisher.objects.filter(public_id=public_id, is_active=True).first()
+    if not publisher:
+        request.session.pop(PORTAL_SESSION_KEY, None)
+    return publisher
+
+
+@require_GET
+def publisher_access(request, publisher_slug):
+    if _rate_limited(request, "portal-access", settings.OFFERWALL_ENTRY_RATE_LIMIT_PER_MINUTE):
+        return _error(request, "Too many requests", "Please wait a minute and try again.", status=429)
+    publisher = get_object_or_404(Publisher, slug=publisher_slug, is_active=True)
+    timestamp_value = str(request.GET.get("ts") or "").strip()
+    nonce = str(request.GET.get("nonce") or "").strip()
+    signature = str(request.GET.get("sig") or "").strip()
+    if not timestamp_value.isdigit():
+        return _error(request, "Invalid publisher access", "The signed portal link is incomplete.")
+    timestamp = int(timestamp_value)
+    age_seconds = int(timezone.now().timestamp()) - timestamp
+    if (
+        age_seconds > settings.OFFERWALL_PORTAL_LINK_TTL_SECONDS
+        or age_seconds < -settings.OFFERWALL_ENTRY_FUTURE_SKEW_SECONDS
+        or not verify_portal_access(
+            publisher, timestamp=timestamp, nonce=nonce, signature=signature
+        )
+    ):
+        return _error(request, "Invalid publisher access", "The signed portal link is invalid or expired.", status=403)
+    current = _portal_publisher(request)
+    if not current or current.pk != publisher.pk:
+        cache_key = f"offerwall-portal-nonce:{publisher.pk}:{nonce}"
+        try:
+            accepted = caches["default"].add(
+                cache_key,
+                1,
+                timeout=settings.OFFERWALL_PORTAL_LINK_TTL_SECONDS + 60,
+            )
+        except Exception:
+            return _error(
+                request,
+                "Publisher access unavailable",
+                "Secure access verification is temporarily unavailable.",
+                status=503,
+            )
+        if not accepted:
+            return _error(request, "Publisher link already used", "Request a fresh portal link.", status=403)
+        request.session.cycle_key()
+        request.session[PORTAL_SESSION_KEY] = str(publisher.public_id)
+        request.session.set_expiry(settings.OFFERWALL_PORTAL_SESSION_TTL_SECONDS)
+    return _no_store(HttpResponseRedirect(reverse("offerwall:publisher-dashboard")))
+
+
+@require_GET
+def publisher_dashboard(request):
+    publisher = _portal_publisher(request)
+    if not publisher:
+        return _error(
+            request,
+            "Publisher access required",
+            "Open a fresh signed dashboard link supplied by RM Wins.",
+            status=403,
+        )
+    wallet = wallet_summary(publisher)
+    stats = publisher.offer_clicks.aggregate(
+        clicks=Count("id"),
+        users=Count("external_user_id", distinct=True),
+        verified_completes=Count(
+            "id",
+            filter=Q(
+                status=SurveyAttempt.Status.COMPLETED,
+                is_verified=True,
+            ),
+        ),
+    )
+    response = render(
+        request,
+        "offerwall/publisher_dashboard.html",
+        {
+            "portal_publisher": publisher,
+            "wallet": wallet,
+            "stats": stats,
+            "ledger_entries": publisher.reward_ledger.select_related("survey")[:25],
+            "payout_requests": publisher.payout_requests.all()[:20],
+            "payout_methods": ("Bank transfer", "PayPal", "Wise", "Other"),
+        },
+    )
+    return _no_store(response)
+
+
+@require_POST
+def publisher_request_withdrawal(request):
+    publisher = _portal_publisher(request)
+    if not publisher:
+        return _error(request, "Publisher access required", "Your portal session has expired.", status=403)
+    try:
+        payout = request_withdrawal(
+            publisher,
+            amount=request.POST.get("amount"),
+            payout_method=request.POST.get("payout_method"),
+            publisher_note=request.POST.get("publisher_note"),
+        )
+    except ValidationError as exc:
+        messages.error(request, " ".join(exc.messages))
+    else:
+        messages.success(
+            request,
+            f"Withdrawal {payout.public_id} was submitted for review.",
+        )
+    return _no_store(HttpResponseRedirect(reverse("offerwall:publisher-dashboard")))
+
+
+@require_POST
+def publisher_logout(request):
+    request.session.pop(PORTAL_SESSION_KEY, None)
+    request.session.cycle_key()
+    return _no_store(HttpResponseRedirect(reverse("home")))
+
+
+@require_GET
+def wallet_api(request):
+    if _rate_limited(request, "wallet-api", settings.OFFERWALL_API_RATE_LIMIT_PER_MINUTE):
+        return _no_store(JsonResponse({"error": "Rate limit exceeded."}, status=429))
+    publisher = _publisher_from_api_key(request)
+    if not publisher:
+        return _no_store(JsonResponse({"error": "Invalid Offerwall API key."}, status=401))
+    summary = wallet_summary(publisher)
+    payouts = [
+        {
+            "id": str(item.public_id),
+            "amount": str(item.amount),
+            "currency": item.currency,
+            "status": item.status,
+            "payout_method": item.payout_method,
+            "requested_at": item.requested_at.isoformat(),
+            "paid_at": item.paid_at.isoformat() if item.paid_at else None,
+        }
+        for item in publisher.payout_requests.all()[:20]
+    ]
+    return _no_store(
+        JsonResponse(
+            {
+                "publisher": publisher.slug,
+                "wallet": {
+                    key: str(value) if isinstance(value, Decimal) else value
+                    for key, value in summary.items()
+                },
+                "payout_requests": payouts,
             }
         )
     )

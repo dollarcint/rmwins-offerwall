@@ -5,6 +5,7 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from django.test import RequestFactory, TestCase, override_settings
+from django.core.exceptions import ValidationError
 from django.urls import reverse
 from django.utils import timezone
 
@@ -16,6 +17,7 @@ from .models import (
     OfferOverride,
     PostbackDelivery,
     Publisher,
+    PublisherPayoutRequest,
     RewardLedgerEntry,
     WallVisit,
 )
@@ -23,6 +25,7 @@ from .security import (
     decrypt_signing_secret,
     sign_click,
     sign_entry,
+    sign_portal_access,
     sign_result,
     sign_session,
 )
@@ -33,6 +36,7 @@ from .services import (
     process_attempt_outcome,
 )
 from .tasks import _validated_callback_url, deliver_postback_task
+from .wallet import request_withdrawal, transition_payout, wallet_summary
 
 
 OFFERWALL_SETTINGS = {
@@ -44,6 +48,9 @@ OFFERWALL_SETTINGS = {
     "OFFERWALL_VISIT_TTL_SECONDS": 7200,
     "OFFERWALL_ENTRY_RATE_LIMIT_PER_MINUTE": 1000,
     "OFFERWALL_API_RATE_LIMIT_PER_MINUTE": 1000,
+    "OFFERWALL_PORTAL_LINK_TTL_SECONDS": 900,
+    "OFFERWALL_PORTAL_SESSION_TTL_SECONDS": 43200,
+    "OFFERWALL_MINIMUM_PAYOUT": Decimal("1.00"),
 }
 
 
@@ -274,6 +281,155 @@ class OfferwallFlowTests(TestCase):
         response = self.client.get(reverse("home"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Publisher-powered survey inventory")
+
+    def _credit_click(self):
+        click = self._click()
+        click.attempt.status = SurveyAttempt.Status.COMPLETED
+        click.attempt.status_source = "innovatemr_s2s"
+        click.attempt.is_verified = True
+        click.attempt.save(
+            update_fields=["status", "status_source", "is_verified", "updated_at"]
+        )
+        process_attempt_outcome(click.attempt_id)
+        return click
+
+    def test_wallet_reserves_withdrawal_and_tracks_paid_balance(self):
+        self._credit_click()
+        initial = wallet_summary(self.publisher)
+        self.assertEqual(initial["net_earnings"], Decimal("3.50"))
+        self.assertEqual(initial["available"], Decimal("3.50"))
+
+        payout = request_withdrawal(
+            self.publisher,
+            amount="2.00",
+            payout_method="Bank transfer",
+            publisher_note="Primary account",
+        )
+        reserved = wallet_summary(self.publisher)
+        self.assertEqual(reserved["reserved"], Decimal("2.00"))
+        self.assertEqual(reserved["available"], Decimal("1.50"))
+
+        payout = transition_payout(payout, PublisherPayoutRequest.Status.APPROVED)
+        payout = transition_payout(payout, PublisherPayoutRequest.Status.PROCESSING)
+        with self.assertRaisesMessage(ValidationError, "payment reference"):
+            transition_payout(payout, PublisherPayoutRequest.Status.PAID)
+        transition_payout(
+            payout,
+            PublisherPayoutRequest.Status.PAID,
+            payment_reference="BANK-123",
+        )
+        paid = wallet_summary(self.publisher)
+        self.assertEqual(paid["reserved"], Decimal("0.00"))
+        self.assertEqual(paid["paid"], Decimal("2.00"))
+        self.assertEqual(paid["available"], Decimal("1.50"))
+
+    def test_rejected_withdrawal_releases_balance_and_overspend_is_blocked(self):
+        self._credit_click()
+        with self.assertRaisesMessage(ValidationError, "exceeds"):
+            request_withdrawal(
+                self.publisher, amount="4.00", payout_method="Wise"
+            )
+        payout = request_withdrawal(
+            self.publisher, amount="3.00", payout_method="Wise"
+        )
+        self.assertEqual(wallet_summary(self.publisher)["available"], Decimal("0.50"))
+        transition_payout(payout, PublisherPayoutRequest.Status.REJECTED)
+        self.assertEqual(wallet_summary(self.publisher)["available"], Decimal("3.50"))
+
+    def test_signed_portal_access_is_one_time_and_creates_private_session(self):
+        timestamp = int(timezone.now().timestamp())
+        nonce = "portal_nonce_unique_123"
+        signature = sign_portal_access(
+            self.publisher, timestamp=timestamp, nonce=nonce
+        )
+        access_url = reverse(
+            "offerwall:publisher-access",
+            kwargs={"publisher_slug": self.publisher.slug},
+        )
+        params = {"ts": timestamp, "nonce": nonce, "sig": signature}
+        response = self.client.get(access_url, params)
+        self.assertRedirects(
+            response, reverse("offerwall:publisher-dashboard"), fetch_redirect_response=False
+        )
+        dashboard = self.client.get(reverse("offerwall:publisher-dashboard"))
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertContains(dashboard, "Available balance")
+        self.assertContains(dashboard, self.publisher.name)
+
+        replay_client = self.client_class()
+        replay = replay_client.get(access_url, params)
+        self.assertEqual(replay.status_code, 403)
+
+    def test_portal_rejects_expired_or_tampered_access(self):
+        timestamp = int((timezone.now() - timedelta(hours=1)).timestamp())
+        nonce = "expired_portal_nonce_123"
+        signature = sign_portal_access(
+            self.publisher, timestamp=timestamp, nonce=nonce
+        )
+        url = reverse(
+            "offerwall:publisher-access",
+            kwargs={"publisher_slug": self.publisher.slug},
+        )
+        self.assertEqual(
+            self.client.get(
+                url, {"ts": timestamp, "nonce": nonce, "sig": signature}
+            ).status_code,
+            403,
+        )
+        current = int(timezone.now().timestamp())
+        self.assertEqual(
+            self.client.get(
+                url,
+                {
+                    "ts": current,
+                    "nonce": "tampered_portal_nonce",
+                    "sig": "0" * 64,
+                },
+            ).status_code,
+            403,
+        )
+
+    def test_portal_submits_withdrawal_and_wallet_api_reports_it(self):
+        self._credit_click()
+        timestamp = int(timezone.now().timestamp())
+        nonce = "withdraw_portal_nonce_123"
+        access_url = reverse(
+            "offerwall:publisher-access",
+            kwargs={"publisher_slug": self.publisher.slug},
+        )
+        self.client.get(
+            access_url,
+            {
+                "ts": timestamp,
+                "nonce": nonce,
+                "sig": sign_portal_access(
+                    self.publisher, timestamp=timestamp, nonce=nonce
+                ),
+            },
+        )
+        response = self.client.post(
+            reverse("offerwall:publisher-withdrawal"),
+            {
+                "amount": "2.50",
+                "payout_method": "PayPal",
+                "publisher_note": "Finance account",
+            },
+        )
+        self.assertRedirects(
+            response, reverse("offerwall:publisher-dashboard"), fetch_redirect_response=False
+        )
+        payout = PublisherPayoutRequest.objects.get()
+        self.assertEqual(payout.amount, Decimal("2.50"))
+        self.assertEqual(payout.status, PublisherPayoutRequest.Status.PENDING)
+
+        api_response = self.client.get(
+            reverse("offerwall:wallet-api"),
+            HTTP_X_OFFERWALL_KEY=self.api_key,
+        )
+        self.assertEqual(api_response.status_code, 200)
+        payload = api_response.json()
+        self.assertEqual(payload["wallet"]["available"], "1.00")
+        self.assertEqual(payload["payout_requests"][0]["id"], str(payout.public_id))
 
 
 @override_settings(

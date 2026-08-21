@@ -16,9 +16,17 @@
       <span class="ow-brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
       <span><strong>RM Wins</strong><small>Offerwall</small></span>
     </a>
-    <span class="ow-secure"><i aria-hidden="true"></i> Secure survey marketplace</span>
+    {% if portal_publisher %}
+    <div class="ow-portal-nav">
+      <span>{{ portal_publisher.name }}</span>
+      <form action="{% url 'offerwall:publisher-logout' %}" method="post">{% csrf_token %}<button type="submit">Sign out</button></form>
+    </div>
+    {% else %}<span class="ow-secure"><i aria-hidden="true"></i> Secure survey marketplace</span>{% endif %}
   </header>
-  <main>{% block content %}{% endblock %}</main>
+  <main>
+    {% if messages %}<div class="ow-messages" aria-live="polite">{% for message in messages %}<div class="{{ message.tags }}">{{ message }}</div>{% endfor %}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
   <footer class="ow-footer">
     <span>© {% now "Y" %} RM Wins Insights</span>
     <span>Signed sessions · Verified rewards · Private tracking</span>

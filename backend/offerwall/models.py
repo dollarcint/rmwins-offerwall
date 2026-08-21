@@ -237,6 +237,65 @@ class RewardLedgerEntry(models.Model):
         return f"{self.entry_type} · {self.amount} {self.currency} · {self.public_id}"
 
 
+class PublisherPayoutRequest(models.Model):
+    """Publisher withdrawal with reserved-balance and staff review state."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending review"
+        APPROVED = "approved", "Approved"
+        PROCESSING = "processing", "Processing"
+        PAID = "paid", "Paid"
+        REJECTED = "rejected", "Rejected"
+        CANCELED = "canceled", "Canceled"
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    publisher = models.ForeignKey(
+        Publisher, on_delete=models.PROTECT, related_name="payout_requests"
+    )
+    amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    currency = models.CharField(max_length=3)
+    status = models.CharField(
+        max_length=12, choices=Status.choices, default=Status.PENDING, db_index=True
+    )
+    payout_method = models.CharField(max_length=80)
+    publisher_note = models.CharField(max_length=500, blank=True)
+    admin_note = models.CharField(max_length=500, blank=True)
+    payment_reference = models.CharField(max_length=160, blank=True)
+    available_balance_snapshot = models.DecimalField(max_digits=12, decimal_places=2)
+    requested_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_offerwall_payouts",
+    )
+
+    class Meta:
+        ordering = ["-requested_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0), name="offerwall_payout_positive_amount"
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["publisher", "status", "-requested_at"],
+                name="publisher_payout_status_idx",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.publisher.slug} · {self.amount} {self.currency} · {self.status}"
+
+
 class PostbackDelivery(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"

@@ -131,6 +131,38 @@ def postback_signature(secret: str, *, timestamp: int, event_id: str, body: byte
     return _hex_hmac(secret, canonical)
 
 
+def portal_payload(*, slug: str, timestamp: int, nonce: str) -> str:
+    return "\n".join(("offerwall-portal-v1", slug, str(timestamp), nonce))
+
+
+def sign_portal_access(publisher, *, timestamp: int, nonce: str) -> str:
+    return _hex_hmac(
+        decrypt_signing_secret(publisher),
+        portal_payload(slug=publisher.slug, timestamp=timestamp, nonce=nonce),
+    )
+
+
+def verify_portal_access(
+    publisher, *, timestamp: int, nonce: str, signature: str
+) -> bool:
+    supplied = str(signature or "").strip().lower()
+    if not SIGNATURE_RE.fullmatch(supplied) or not NONCE_RE.fullmatch(str(nonce or "")):
+        return False
+    return hmac.compare_digest(
+        sign_portal_access(publisher, timestamp=timestamp, nonce=nonce), supplied
+    )
+
+
+def signed_portal_query(publisher, *, timestamp: int, nonce: str) -> str:
+    return urlencode(
+        {
+            "ts": timestamp,
+            "nonce": nonce,
+            "sig": sign_portal_access(publisher, timestamp=timestamp, nonce=nonce),
+        }
+    )
+
+
 def signed_entry_query(
     publisher, *, external_user_id: str, timestamp: int, nonce: str
 ) -> str:

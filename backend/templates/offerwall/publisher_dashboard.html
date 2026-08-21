@@ -1,0 +1,45 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}Publisher wallet · {{ portal_publisher.name }}{% endblock %}
+{% block content %}
+<section class="ow-publisher-shell">
+  <header class="ow-publisher-heading">
+    <div><span class="ow-eyebrow"><i></i> Publisher dashboard</span><h1>{{ portal_publisher.name }}</h1><p>Verified rewards, payout balance and withdrawal history.</p></div>
+    <span class="ow-session-pill">Currency <strong>{{ wallet.currency }}</strong></span>
+  </header>
+  <div class="ow-wallet-grid">
+    <article class="primary"><small>Available balance</small><strong>{{ wallet.currency }} {{ wallet.available|floatformat:2 }}</strong><span>Ready to withdraw</span></article>
+    <article><small>Net earnings</small><strong>{{ wallet.currency }} {{ wallet.net_earnings|floatformat:2 }}</strong><span>Credits minus reversals</span></article>
+    <article><small>Reserved</small><strong>{{ wallet.currency }} {{ wallet.reserved|floatformat:2 }}</strong><span>Pending and processing</span></article>
+    <article><small>Paid</small><strong>{{ wallet.currency }} {{ wallet.paid|floatformat:2 }}</strong><span>Completed withdrawals</span></article>
+  </div>
+  <div class="ow-publisher-stats">
+    <span><strong>{{ stats.clicks }}</strong> Clicks</span><span><strong>{{ stats.users }}</strong> Users</span><span><strong>{{ stats.verified_completes }}</strong> Verified completes</span>
+  </div>
+  <div class="ow-publisher-layout">
+    <section class="ow-panel">
+      <header><div><span class="ow-eyebrow"><i></i> Recent activity</span><h2>Reward ledger</h2></div></header>
+      <div class="ow-table-wrap"><table><thead><tr><th>Date</th><th>User</th><th>Offer</th><th>Type</th><th>Amount</th></tr></thead><tbody>
+      {% for entry in ledger_entries %}<tr><td>{{ entry.created_at|date:'d M Y H:i' }}</td><td class="mono">{{ entry.external_user_id }}</td><td>{{ entry.survey.name|default:entry.survey.local_id }}</td><td><span class="ow-status {{ entry.entry_type }}">{{ entry.get_entry_type_display }}</span></td><td class="ow-money {% if entry.entry_type == 'reversal' %}negative{% endif %}">{% if entry.entry_type == 'reversal' %}−{% else %}+{% endif %}{{ entry.currency }} {{ entry.amount|floatformat:2 }}</td></tr>
+      {% empty %}<tr><td colspan="5" class="ow-table-empty">No verified reward activity yet.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </section>
+    <aside class="ow-panel ow-withdrawal-panel">
+      <header><div><span class="ow-eyebrow"><i></i> Payouts</span><h2>Request withdrawal</h2></div></header>
+      <p>Minimum payout: {{ wallet.currency }} {{ wallet.minimum_payout|floatformat:2 }}</p>
+      <form action="{% url 'offerwall:publisher-withdrawal' %}" method="post" class="ow-withdrawal-form">{% csrf_token %}
+        <label>Amount<input name="amount" type="number" min="{{ wallet.minimum_payout }}" max="{{ wallet.available }}" step="0.01" required placeholder="0.00"></label>
+        <label>Payout method<select name="payout_method" required><option value="">Select method</option>{% for method in payout_methods %}<option>{{ method }}</option>{% endfor %}</select></label>
+        <label>Payment note<textarea name="publisher_note" maxlength="500" rows="3" placeholder="Account label or payout instructions. Do not enter passwords."></textarea></label>
+        <button type="submit" class="ow-button primary wide" {% if wallet.available < wallet.minimum_payout %}disabled{% endif %}>Submit withdrawal</button>
+      </form>
+    </aside>
+  </div>
+  <section class="ow-panel ow-payout-history">
+    <header><div><span class="ow-eyebrow"><i></i> Withdrawal history</span><h2>Payout requests</h2></div></header>
+    <div class="ow-table-wrap"><table><thead><tr><th>Requested</th><th>ID</th><th>Method</th><th>Status</th><th>Amount</th><th>Reference</th></tr></thead><tbody>
+    {% for payout in payout_requests %}<tr><td>{{ payout.requested_at|date:'d M Y H:i' }}</td><td class="mono">{{ payout.public_id }}</td><td>{{ payout.payout_method }}</td><td><span class="ow-status {{ payout.status }}">{{ payout.get_status_display }}</span></td><td>{{ payout.currency }} {{ payout.amount|floatformat:2 }}</td><td>{{ payout.payment_reference|default:'—' }}</td></tr>
+    {% empty %}<tr><td colspan="6" class="ow-table-empty">No withdrawal requests yet.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+</section>
+{% endblock %}

@@ -2,6 +2,7 @@ import secrets
 
 from django.conf import settings
 from django.contrib import admin, messages
+from django.core.exceptions import ValidationError
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html
@@ -12,11 +13,13 @@ from .models import (
     OfferOverride,
     PostbackDelivery,
     Publisher,
+    PublisherPayoutRequest,
     RewardLedgerEntry,
     WallVisit,
 )
-from .security import signed_entry_query
+from .security import signed_entry_query, signed_portal_query
 from .services import ensure_service_user
+from .wallet import transition_payout, wallet_summary
 
 
 admin.site.site_header = "RM Wins Offerwall Administration"
@@ -42,6 +45,7 @@ class PublisherAdmin(admin.ModelAdmin):
         "postback_enabled",
         "is_active",
         "masked_api_key_display",
+        "wallet_balance_display",
         "updated_at",
     ]
     list_filter = ["is_active", "postback_enabled", "currency"]
@@ -52,6 +56,8 @@ class PublisherAdmin(admin.ModelAdmin):
         "masked_signing_secret_display",
         "masked_api_key_display",
         "test_wall_link",
+        "publisher_portal_link",
+        "wallet_summary_display",
         "signing_secret_changed_at",
         "api_key_changed_at",
         "api_key_last_used_at",
@@ -60,7 +66,10 @@ class PublisherAdmin(admin.ModelAdmin):
     ]
     fieldsets = [
         ("Publisher", {"fields": ["name", "slug", "public_id", "service_user", "is_active"]}),
-        ("Commercial", {"fields": ["payout_percent", "currency"]}),
+        (
+            "Commercial",
+            {"fields": ["payout_percent", "currency", "wallet_summary_display"]},
+        ),
         ("Postback", {"fields": ["postback_enabled", "callback_url"]}),
         (
             "Credentials",
@@ -76,7 +85,10 @@ class PublisherAdmin(admin.ModelAdmin):
                 ]
             },
         ),
-        ("Integration preview", {"fields": ["test_wall_link"]}),
+        (
+            "Integration preview",
+            {"fields": ["test_wall_link", "publisher_portal_link"]},
+        ),
         ("Audit", {"fields": ["created_at", "updated_at"], "classes": ["collapse"]}),
     ]
     inlines = [OfferOverrideInline]
@@ -88,6 +100,30 @@ class PublisherAdmin(admin.ModelAdmin):
     @admin.display(description="Inventory API key")
     def masked_api_key_display(self, obj):
         return obj.masked_api_key if obj and obj.pk else "Generated on first save"
+
+    @admin.display(description="Available wallet")
+    def wallet_balance_display(self, obj):
+        if not obj or not obj.pk:
+            return "—"
+        wallet = wallet_summary(obj)
+        return f"{wallet['currency']} {wallet['available']:.2f}"
+
+    @admin.display(description="Wallet summary")
+    def wallet_summary_display(self, obj):
+        if not obj or not obj.pk:
+            return "Available after first save."
+        wallet = wallet_summary(obj)
+        return format_html(
+            "Net earned: <strong>{} {:.2f}</strong> · Reserved: {} {:.2f} · Paid: {} {:.2f} · Available: <strong>{} {:.2f}</strong>",
+            wallet["currency"],
+            wallet["net_earnings"],
+            wallet["currency"],
+            wallet["reserved"],
+            wallet["currency"],
+            wallet["paid"],
+            wallet["currency"],
+            wallet["available"],
+        )
 
     @admin.display(description="Signed preview link")
     def test_wall_link(self, obj):
@@ -105,6 +141,21 @@ class PublisherAdmin(admin.ModelAdmin):
         base = str(settings.OFFERWALL_PUBLIC_BASE_URL or settings.PUBLIC_APP_BASE_URL or "").rstrip("/")
         url = f"{base}{path}?{query}" if base else f"{path}?{query}"
         return format_html('<a href="{}" target="_blank" rel="noopener">Open 15-minute preview wall ↗</a>', url)
+
+    @admin.display(description="Publisher wallet dashboard")
+    def publisher_portal_link(self, obj):
+        if not obj or not obj.pk:
+            return "Save the publisher first."
+        timestamp = int(timezone.now().timestamp())
+        nonce = secrets.token_urlsafe(18)
+        path = reverse("offerwall:publisher-access", kwargs={"publisher_slug": obj.slug})
+        query = signed_portal_query(obj, timestamp=timestamp, nonce=nonce)
+        base = str(settings.OFFERWALL_PUBLIC_BASE_URL or settings.PUBLIC_APP_BASE_URL or "").rstrip("/")
+        url = f"{base}{path}?{query}" if base else f"{path}?{query}"
+        return format_html(
+            '<a href="{}" target="_blank" rel="noopener">Open one-time 15-minute publisher dashboard link ↗</a>',
+            url,
+        )
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
@@ -160,6 +211,119 @@ class RewardLedgerEntryAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+def _transition_selected(modeladmin, request, queryset, status):
+    updated = 0
+    errors = []
+    for payout in queryset.select_related("publisher"):
+        try:
+            transition_payout(
+                payout,
+                status,
+                reviewer=request.user,
+                payment_reference=payout.payment_reference,
+                admin_note=payout.admin_note,
+            )
+        except ValidationError as exc:
+            errors.append(f"{payout.public_id}: {' '.join(exc.messages)}")
+        else:
+            updated += 1
+    if updated:
+        modeladmin.message_user(request, f"Updated {updated} payout request(s).")
+    if errors:
+        modeladmin.message_user(request, " | ".join(errors[:5]), level=messages.ERROR)
+
+
+@admin.action(description="Approve selected pending payouts")
+def approve_payouts(modeladmin, request, queryset):
+    _transition_selected(modeladmin, request, queryset, PublisherPayoutRequest.Status.APPROVED)
+
+
+@admin.action(description="Move selected approved payouts to processing")
+def process_payouts(modeladmin, request, queryset):
+    _transition_selected(modeladmin, request, queryset, PublisherPayoutRequest.Status.PROCESSING)
+
+
+@admin.action(description="Mark selected processing payouts paid (reference required)")
+def mark_payouts_paid(modeladmin, request, queryset):
+    _transition_selected(modeladmin, request, queryset, PublisherPayoutRequest.Status.PAID)
+
+
+@admin.action(description="Reject selected active payouts")
+def reject_payouts(modeladmin, request, queryset):
+    _transition_selected(modeladmin, request, queryset, PublisherPayoutRequest.Status.REJECTED)
+
+
+@admin.action(description="Cancel selected pending/approved payouts")
+def cancel_payouts(modeladmin, request, queryset):
+    _transition_selected(modeladmin, request, queryset, PublisherPayoutRequest.Status.CANCELED)
+
+
+@admin.register(PublisherPayoutRequest)
+class PublisherPayoutRequestAdmin(admin.ModelAdmin):
+    list_display = [
+        "public_id",
+        "publisher",
+        "amount",
+        "currency",
+        "status",
+        "payout_method",
+        "requested_at",
+        "paid_at",
+    ]
+    list_filter = ["status", "currency", "payout_method", "requested_at"]
+    search_fields = [
+        "public_id",
+        "publisher__name",
+        "publisher__slug",
+        "payment_reference",
+    ]
+    readonly_fields = [
+        "public_id",
+        "publisher",
+        "amount",
+        "currency",
+        "status",
+        "payout_method",
+        "publisher_note",
+        "available_balance_snapshot",
+        "requested_at",
+        "reviewed_at",
+        "paid_at",
+        "updated_at",
+        "reviewed_by",
+    ]
+    fields = [
+        "public_id",
+        "publisher",
+        "amount",
+        "currency",
+        "status",
+        "payout_method",
+        "publisher_note",
+        "available_balance_snapshot",
+        "payment_reference",
+        "admin_note",
+        "requested_at",
+        "reviewed_at",
+        "paid_at",
+        "updated_at",
+        "reviewed_by",
+    ]
+    actions = [
+        approve_payouts,
+        process_payouts,
+        mark_payouts_paid,
+        reject_payouts,
+        cancel_payouts,
+    ]
+
+    def has_add_permission(self, request):
         return False
 
     def has_delete_permission(self, request, obj=None):
