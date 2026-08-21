@@ -13,7 +13,8 @@ from django.contrib.auth.decorators import user_passes_test
 from django.core.cache import caches
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, DecimalField, Q, Sum, Value
+from django.db.models.functions import Coalesce
 from django.http import Http404, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
@@ -29,7 +30,12 @@ from accounts.throttling import (
 )
 from surveys.models import Survey, SurveyAttempt
 
-from .forms import PublisherPlacementForm, SupplierLoginForm, SupplierSignupForm
+from .forms import (
+    PublisherPlacementCreateForm,
+    PublisherPlacementForm,
+    SupplierLoginForm,
+    SupplierSignupForm,
+)
 from .models import (
     OfferClick,
     PostbackDelivery,
@@ -782,7 +788,8 @@ def _remember_placement_secret(request, placement):
         }
 
 
-def _publisher_placements_response(request, publisher, *, form, editing=None):
+def _publisher_placements_response(request, publisher, *, form):
+    money_field = DecimalField(max_digits=14, decimal_places=2)
     placements = list(
         publisher.placements.annotate(
             visit_count=Count("visits", distinct=True),
@@ -795,18 +802,34 @@ def _publisher_placements_response(request, publisher, *, form, editing=None):
                 ),
                 distinct=True,
             ),
+            credit_revenue=Coalesce(
+                Sum(
+                    "visits__clicks__ledger_entries__amount",
+                    filter=Q(
+                        visits__clicks__ledger_entries__entry_type=RewardLedgerEntry.EntryType.CREDIT
+                    ),
+                ),
+                Value(Decimal("0.00"), output_field=money_field),
+                output_field=money_field,
+            ),
+            reversal_revenue=Coalesce(
+                Sum(
+                    "visits__clicks__ledger_entries__amount",
+                    filter=Q(
+                        visits__clicks__ledger_entries__entry_type=RewardLedgerEntry.EntryType.REVERSAL
+                    ),
+                ),
+                Value(Decimal("0.00"), output_field=money_field),
+                output_field=money_field,
+            ),
         )
     )
-    revealed = request.session.pop("offerwall_placement_secret_once", None)
     for placement in placements:
-        _placement_embed_details(request, placement)
-        if revealed and revealed.get("placement_id") == str(placement.public_id):
-            placement.revealed_postback_secret = revealed.get("secret", "")
+        placement.total_revenue = placement.credit_revenue - placement.reversal_revenue
     context = _supplier_portal_context(publisher, "placements")
     context.update(
         {
             "form": form,
-            "editing_placement": editing,
             "placements": placements,
             "active_placements": sum(
                 item.status == PublisherPlacement.Status.ACTIVE for item in placements
@@ -821,24 +844,19 @@ def publisher_placements(request):
     publisher, denied = _publisher_portal_or_response(request)
     if denied:
         return denied
-    form = PublisherPlacementForm(
+    form = PublisherPlacementCreateForm(
         request.POST or None,
         publisher=publisher,
-        initial={"currency": publisher.currency},
     )
     if request.method == "POST" and form.is_valid():
-        placement = form.save(commit=False)
-        placement.publisher = publisher
-        placement.save()
+        placement = form.save()
         _remember_placement_secret(request, placement)
         messages.success(
             request,
-            f"Placement “{placement.name}” created. Your iframe is ready below.",
+            f"Placement “{placement.name}” created. Open Settings to complete its integration.",
         )
         return _no_store(
-            HttpResponseRedirect(
-                f"{reverse('offerwall:publisher-placements')}#placement-{placement.public_id}"
-            )
+            HttpResponseRedirect(reverse("offerwall:publisher-placements"))
         )
     return _publisher_placements_response(request, publisher, form=form)
 
@@ -863,14 +881,20 @@ def publisher_placement_edit(request, placement_id):
         messages.success(request, f"Placement “{placement.name}” updated.")
         return _no_store(
             HttpResponseRedirect(
-                f"{reverse('offerwall:publisher-placements')}#placement-{placement.public_id}"
+                reverse(
+                    "offerwall:publisher-placement-edit",
+                    kwargs={"placement_id": placement.public_id},
+                )
             )
         )
-    return _publisher_placements_response(
-        request,
-        publisher,
-        form=form,
-        editing=placement,
+    _placement_embed_details(request, placement)
+    revealed = request.session.pop("offerwall_placement_secret_once", None)
+    if revealed and revealed.get("placement_id") == str(placement.public_id):
+        placement.revealed_postback_secret = revealed.get("secret", "")
+    context = _supplier_portal_context(publisher, "placements")
+    context.update({"form": form, "placement": placement})
+    return _no_store(
+        render(request, "offerwall/publisher_placement_settings.html", context)
     )
 
 
@@ -908,11 +932,13 @@ def publisher_placement_action(request, placement_id):
         messages.success(request, "A new postback signing key was generated. Copy it now.")
     else:
         raise Http404
-    return _no_store(
-        HttpResponseRedirect(
-            f"{reverse('offerwall:publisher-placements')}#placement-{placement.public_id}"
+    destination = reverse("offerwall:publisher-placements")
+    if action == "rotate-postback-secret":
+        destination = reverse(
+            "offerwall:publisher-placement-edit",
+            kwargs={"placement_id": placement.public_id},
         )
-    )
+    return _no_store(HttpResponseRedirect(destination))
 
 
 SUPPLIER_SECTION_COPY = {

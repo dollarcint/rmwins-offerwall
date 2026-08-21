@@ -138,6 +138,60 @@ class SupplierSignupForm(forms.Form):
         return cleaned
 
 
+class PublisherPlacementCreateForm(forms.ModelForm):
+    """Small first-step form matching the publisher placement workflow."""
+
+    class Meta:
+        model = PublisherPlacement
+        fields = ["platform", "website_url"]
+        labels = {"website_url": "Website / project URL"}
+        widgets = {
+            "platform": forms.RadioSelect,
+            "website_url": forms.URLInput(
+                attrs={
+                    "placeholder": "https://yourwebsite.com",
+                    "autocomplete": "url",
+                }
+            ),
+        }
+
+    def __init__(self, *args, publisher=None, **kwargs):
+        self.publisher = publisher
+        super().__init__(*args, **kwargs)
+
+    def clean_website_url(self):
+        value = str(self.cleaned_data.get("website_url") or "").strip()
+        if not value.lower().startswith("https://"):
+            raise ValidationError("Use an HTTPS URL.")
+        return value
+
+    def save(self, commit=True):
+        if not self.publisher:
+            raise ValueError("A publisher is required to create a placement.")
+        placement = super().save(commit=False)
+        placement.publisher = self.publisher
+        hostname = str(urlsplit(placement.website_url).hostname or "placement")
+        hostname = hostname.lower().removeprefix("www.")
+        raw_label = hostname.split(".")[0].replace("-", " ").replace("_", " ")
+        label = " ".join(part.capitalize() for part in raw_label.split()) or "Placement"
+        placement.website_name = label
+
+        base_name = label
+        candidate = base_name
+        suffix = 2
+        while PublisherPlacement.objects.filter(
+            publisher=self.publisher,
+            name__iexact=candidate,
+        ).exists():
+            candidate = f"{base_name} {suffix}"
+            suffix += 1
+        placement.name = candidate
+        placement.currency = self.publisher.currency
+        if commit:
+            placement.save()
+        return placement
+
+
 class PublisherPlacementForm(forms.ModelForm):
     class Meta:
         model = PublisherPlacement

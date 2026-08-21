@@ -1,0 +1,80 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}{{ placement.website_name }} settings · RM Wins Offerwall{% endblock %}
+{% block content %}
+<section class="ow-apps-page ow-placement-settings-page">
+  <header class="ow-apps-heading">
+    <div>
+      <a class="ow-settings-back" href="{% url 'offerwall:publisher-placements' %}">← Apps / Placements</a>
+      <h1>{{ placement.website_name }}</h1>
+      <p>ID: {{ placement.app_id }} · {{ placement.get_platform_display }} · {{ placement.get_status_display }}</p>
+    </div>
+  </header>
+
+  <section class="ow-settings-shell">
+    <nav class="ow-settings-tabs" aria-label="Placement settings">
+      <a class="active" href="#general">General</a>
+      <a href="#currency">Currency</a>
+      <a href="#postback">Postback</a>
+      <a href="#integrations">Integrations</a>
+    </nav>
+    <form method="post" class="ow-settings-form" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="ow-field-errors">{{ form.non_field_errors }}</div>{% endif %}
+      <fieldset id="general">
+        <legend><span>General Information</span><small>Core identification and the website or app where this placement runs.</small></legend>
+        <div class="ow-settings-grid">
+          <label><span>Platform</span>{{ form.platform }}{{ form.platform.errors }}</label>
+          <label><span>Placement name</span>{{ form.name }}{{ form.name.errors }}</label>
+          <label><span>App / website name</span>{{ form.website_name }}{{ form.website_name.errors }}</label>
+          <label><span>Project / website URL</span>{{ form.website_url }}{{ form.website_url.errors }}</label>
+          <label class="wide"><span>Additional allowed domains</span>{{ form.allowed_domains }}{{ form.allowed_domains.errors }}</label>
+        </div>
+      </fieldset>
+      <fieldset id="currency">
+        <legend><span>Currency Configuration</span><small>Control the reward value shown to respondents.</small></legend>
+        <div class="ow-settings-grid">
+          <label><span>Currency name</span>{{ form.currency }}{{ form.currency.errors }}</label>
+          <label><span>Base conversion rate</span>{{ form.currency_multiplier }}{{ form.currency_multiplier.errors }}</label>
+        </div>
+      </fieldset>
+      <fieldset id="postback">
+        <legend><span>Postback Configuration</span><small>Signed outcome callbacks with respondent and transaction attribution.</small></legend>
+        <div class="ow-settings-grid">
+          <label class="wide ow-settings-check">{{ form.postback_enabled }}<span>Enable placement postbacks</span>{{ form.postback_enabled.errors }}</label>
+          <label class="wide"><span>HTTPS postback URL</span>{{ form.postback_url }}{{ form.postback_url.errors }}</label>
+          <label><span>Respondent ID variable</span>{{ form.respondent_id_parameter }}{{ form.respondent_id_parameter.errors }}</label>
+          <label><span>Campaign ID variable</span>{{ form.campaign_id_parameter }}{{ form.campaign_id_parameter.errors }}</label>
+          <label><span>Affiliate sub variable</span>{{ form.affiliate_sub_parameter }}{{ form.affiliate_sub_parameter.errors }}</label>
+        </div>
+        <div class="ow-settings-secret">
+          <strong>Signing key: {{ placement.masked_postback_secret }}</strong>
+          <span>Verify X-Offerwall-Signature against the raw JSON body.</span>
+        </div>
+      </fieldset>
+      <footer class="ow-settings-save"><a href="{% url 'offerwall:publisher-placements' %}">Cancel</a><button type="submit">Save Changes</button></footer>
+    </form>
+
+    <section class="ow-settings-integration" id="integrations">
+      <header><span>Quick Integrations</span><h2>iFrame & direct link</h2></header>
+      <div class="ow-iframe-grid">
+        <div class="ow-code-panel"><div><h3>Recommended iframe</h3><button type="button" data-copy-target="placement-iframe">Copy Code</button></div><textarea id="placement-iframe" readonly rows="7">{{ placement.iframe_code }}</textarea></div>
+        <div class="ow-code-panel"><div><h3>Direct URL</h3><button type="button" data-copy-target="placement-direct">Copy URL</button></div><textarea id="placement-direct" readonly rows="7">{{ placement.direct_url }}</textarea></div>
+      </div>
+      <div class="ow-iframe-preview"><div><h3>Live Preview</h3><span>{{ placement.app_id }}</span></div><iframe src="{{ placement.embed_preview_url }}" title="{{ placement.name }} preview" loading="lazy"></iframe></div>
+    </section>
+  </section>
+</section>
+<script>
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-copy-target]');
+  if (!button) return;
+  const field = document.getElementById(button.dataset.copyTarget);
+  if (!field || !navigator.clipboard) return;
+  navigator.clipboard.writeText(field.value).then(() => {
+    const original = button.textContent;
+    button.textContent = 'Copied';
+    setTimeout(() => { button.textContent = original; }, 1400);
+  });
+});
+</script>
+{% endblock %}

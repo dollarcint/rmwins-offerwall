@@ -192,9 +192,9 @@ class PublisherPlacement(models.Model):
     """Supplier-managed website placement used to embed the offerwall."""
 
     class Platform(models.TextChoices):
-        RESPONSIVE = "responsive", "Responsive web"
-        DESKTOP = "desktop", "Desktop"
-        MOBILE = "mobile", "Mobile"
+        WEB = "web", "Website"
+        ANDROID = "android", "Android"
+        IOS = "ios", "iOS"
 
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
@@ -215,7 +215,7 @@ class PublisherPlacement(models.Model):
     platform = models.CharField(
         max_length=12,
         choices=Platform.choices,
-        default=Platform.RESPONSIVE,
+        default=Platform.WEB,
     )
     name = models.CharField(max_length=120)
     website_name = models.CharField(max_length=160)
@@ -293,6 +293,11 @@ class PublisherPlacement(models.Model):
     @property
     def is_active(self):
         return self.status == self.Status.ACTIVE
+
+    @property
+    def app_id(self):
+        """Stable OpinionUniverse-style identifier shown to the supplier."""
+        return f"ID_{self.public_id.hex}"
 
     @property
     def allowed_domain_list(self):

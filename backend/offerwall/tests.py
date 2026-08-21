@@ -524,37 +524,35 @@ class OfferwallFlowTests(TestCase):
         response = self.client.post(
             reverse("offerwall:publisher-placements"),
             {
-                "platform": PublisherPlacement.Platform.RESPONSIVE,
-                "name": "Main rewards wall",
-                "website_name": "Rewards Club",
+                "platform": PublisherPlacement.Platform.WEB,
                 "website_url": "https://rewards.example.test",
-                "allowed_domains": "app.rewards.example.test",
-                "postback_enabled": "on",
-                "postback_url": "https://rewards.example.test/postback",
-                "currency": "usd",
-                "currency_multiplier": "1.25",
-                "respondent_id_parameter": "member_id",
-                "campaign_id_parameter": "campaign_id",
-                "affiliate_sub_parameter": "subid",
             },
         )
         placement = PublisherPlacement.objects.get(publisher=self.publisher)
         self.assertRedirects(
             response,
-            f"{reverse('offerwall:publisher-placements')}#placement-{placement.public_id}",
+            reverse("offerwall:publisher-placements"),
             fetch_redirect_response=False,
         )
         self.assertEqual(placement.currency, "USD")
-        self.assertTrue(placement.postback_enabled)
-        self.assertEqual(placement.allowed_domain_list, ["app.rewards.example.test"])
+        self.assertEqual(placement.name, "Rewards")
+        self.assertEqual(placement.website_name, "Rewards")
+        self.assertFalse(placement.postback_enabled)
         page = self.client.get(reverse("offerwall:publisher-placements"))
-        self.assertContains(page, "Main rewards wall")
-        self.assertContains(page, "USER_ID")
-        self.assertContains(page, str(placement.public_id))
+        self.assertContains(page, "Apps / Placement")
+        self.assertContains(page, "Total Revenue")
+        self.assertContains(page, placement.app_id)
+        self.assertContains(page, "Settings")
         self.assertContains(page, "Respondents")
         self.assertContains(page, "Open-ended answers")
-        self.assertContains(page, "Copy signing key")
-        self.assertContains(page, "Direct-link integration")
+        settings_page = self.client.get(
+            reverse(
+                "offerwall:publisher-placement-edit",
+                kwargs={"placement_id": placement.public_id},
+            )
+        )
+        self.assertContains(settings_page, "Recommended iframe")
+        self.assertContains(settings_page, "Copy Code")
 
     def test_placement_embed_creates_placement_attributed_visit(self):
         placement = PublisherPlacement.objects.create(
@@ -643,7 +641,7 @@ class OfferwallFlowTests(TestCase):
         response = self.client.post(
             edit_url,
             {
-                "platform": PublisherPlacement.Platform.MOBILE,
+                "platform": PublisherPlacement.Platform.ANDROID,
                 "name": "Mobile rewards wall",
                 "website_name": "Publisher App",
                 "website_url": "https://app.publisher.example.test",
@@ -736,8 +734,8 @@ class OfferwallFlowTests(TestCase):
             website_url="https://other.example.test",
         )
         response = self.client.get(reverse("offerwall:publisher-placements"))
-        self.assertContains(response, "Owned placement")
-        self.assertNotContains(response, "Private other placement")
+        self.assertContains(response, "Owned Site")
+        self.assertNotContains(response, "Other Site")
 
     def test_supplier_placeholder_section_uses_portal_shell(self):
         self._open_supplier_session(suffix="placeholder")
