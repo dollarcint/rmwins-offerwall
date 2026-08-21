@@ -71,6 +71,11 @@ urlpatterns = [
     ),
     path("publisher/logout/", views.publisher_logout, name="publisher-logout"),
     path(
+        "embed/app/<str:app_id>/",
+        views.placement_app_embed,
+        name="placement-app-embed",
+    ),
+    path(
         "embed/<uuid:placement_id>/",
         views.placement_embed,
         name="placement-embed",

@@ -4956,6 +4956,24 @@ a {
   }
 }
 
+.ow-ou-general-grid textarea {
+  width: 100%;
+  min-height: 112px;
+  resize: vertical;
+  border: 1px solid #d8e3ed;
+  border-radius: 8px;
+  padding: 13px 14px;
+  color: #29445f;
+  background: #fff;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.55;
+}
+.ow-ou-general-grid textarea:focus {
+  border-color: var(--rm-blue);
+  outline: 3px solid rgba(34, 109, 242, .11);
+}
+
 /* Final visual alignment against the live OpinionUniverse placement screens. */
 .ow-supplier-app {
   grid-template-columns: 296px minmax(0, 1fr);

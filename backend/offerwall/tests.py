@@ -579,6 +579,9 @@ class OfferwallFlowTests(TestCase):
         )
         self.assertContains(settings_page, "Quick Integrations")
         self.assertContains(settings_page, "Copy Code")
+        self.assertContains(settings_page, f"embed/app/{placement.app_id}/")
+        self.assertContains(settings_page, "embed.js?v=1")
+        self.assertNotContains(settings_page, "clipboard-write")
 
     def test_supplier_can_configure_all_placement_settings(self):
         self._open_supplier_session(suffix="settings")
@@ -635,6 +638,10 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(response.status_code, 302)
         placement.refresh_from_db()
         self.assertEqual(placement.traffic_type, PublisherPlacement.TrafficType.BOTH)
+        self.assertEqual(
+            placement.allowed_domains,
+            "rewards.example.test\napp.example.test",
+        )
         self.assertEqual(placement.currency_name, "Coins")
         self.assertEqual(placement.display_reward(Decimal("2.00")), Decimal("40.00"))
         self.assertTrue(placement.postback_enabled)
@@ -794,6 +801,63 @@ class OfferwallFlowTests(TestCase):
         direct_visit = WallVisit.objects.get(external_user_id="member-direct")
         self.assertEqual(direct_visit.external_campaign_id, "winter")
         self.assertEqual(direct_visit.affiliate_sub_id, "cta")
+
+    def test_direct_app_iframe_enforces_domains_and_ignores_sid_placeholder(self):
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Direct frame",
+            website_name="Publisher Site",
+            website_url="https://publisher.example.test",
+            allowed_domains="*.partner.example.test",
+        )
+        path = reverse(
+            "offerwall:placement-app-embed",
+            kwargs={"app_id": placement.app_id},
+        )
+        preview = self.client.get(
+            path,
+            {"SID": "{SID}"},
+            HTTP_REFERER="https://publisher.example.test/rewards",
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertFalse(WallVisit.objects.filter(placement=placement).exists())
+        self.assertNotIn("X-Frame-Options", preview)
+        self.assertIn(
+            "https://publisher.example.test",
+            preview["Content-Security-Policy"],
+        )
+        self.assertIn(
+            "https://*.partner.example.test",
+            preview["Content-Security-Policy"],
+        )
+
+        denied = self.client.get(
+            path,
+            {"SID": "stolen-user"},
+            HTTP_REFERER="https://unapproved.example.test/page",
+        )
+        self.assertEqual(denied.status_code, 403)
+        self.assertFalse(WallVisit.objects.filter(placement=placement).exists())
+
+        allowed = self.client.get(
+            path,
+            {"SID": "partner-user"},
+            HTTP_REFERER="https://rewards.partner.example.test/page",
+        )
+        self.assertEqual(allowed.status_code, 302)
+        visit = WallVisit.objects.get(placement=placement)
+        self.assertEqual(visit.external_user_id, "partner-user")
+        session_location = urlsplit(allowed["Location"])
+        session_page = self.client.get(
+            f"{session_location.path}?{session_location.query}",
+            HTTP_REFERER="https://rewards.partner.example.test/page",
+        )
+        self.assertEqual(session_page.status_code, 200)
+        self.assertNotIn("X-Frame-Options", session_page)
+        self.assertIn(
+            "https://*.partner.example.test",
+            session_page["Content-Security-Policy"],
+        )
 
     def test_supplier_can_delete_own_placement(self):
         self._open_supplier_session(suffix="lifecycle")

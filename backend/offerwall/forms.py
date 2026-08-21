@@ -238,8 +238,60 @@ def _validate_brand_image(upload, *, max_bytes):
 class PlacementGeneralForm(forms.ModelForm):
     class Meta:
         model = PublisherPlacement
-        fields = ["traffic_type"]
-        widgets = {"traffic_type": forms.RadioSelect}
+        fields = ["traffic_type", "allowed_domains"]
+        widgets = {
+            "traffic_type": forms.RadioSelect,
+            "allowed_domains": forms.Textarea(
+                attrs={
+                    "rows": 4,
+                    "placeholder": "rewards.example.com\napp.example.com",
+                }
+            ),
+        }
+
+    def clean_allowed_domains(self):
+        value = str(self.cleaned_data.get("allowed_domains") or "")
+        domains = []
+        for raw_value in value.splitlines():
+            candidate = raw_value.strip().lower().rstrip("/")
+            if not candidate:
+                continue
+            wildcard = candidate.startswith("*.") or candidate.startswith("https://*.")
+            parse_value = candidate
+            if candidate.startswith("https://*."):
+                parse_value = "https://" + candidate[len("https://*.") :]
+            elif candidate.startswith("*."):
+                parse_value = "https://" + candidate[2:]
+            elif "://" not in candidate:
+                parse_value = "https://" + candidate
+            parsed = urlsplit(parse_value)
+            try:
+                port = parsed.port
+            except ValueError as exc:
+                raise ValidationError(f"Invalid allowed domain: {raw_value}") from exc
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.query
+                or parsed.fragment
+                or parsed.path not in {"", "/"}
+            ):
+                raise ValidationError(
+                    f"Use a hostname or clean HTTPS origin for allowed domain: {raw_value}"
+                )
+            host = parsed.hostname.lower()
+            if any(character.isspace() for character in host) or "_" in host:
+                raise ValidationError(f"Invalid allowed domain: {raw_value}")
+            normalized = f"{'*.' if wildcard else ''}{host}"
+            if port:
+                normalized = f"{normalized}:{port}"
+            if normalized not in domains:
+                domains.append(normalized)
+        if len(domains) > 20:
+            raise ValidationError("Add no more than 20 allowed domains.")
+        return "\n".join(domains)
 
 
 class PlacementCurrencyForm(forms.ModelForm):

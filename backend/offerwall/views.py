@@ -23,6 +23,7 @@ from django.db.models.functions import Coalesce
 from django.core.paginator import Paginator
 from django.http import FileResponse, Http404, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
+from django.templatetags.static import static
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import slugify
@@ -103,6 +104,70 @@ def _registration_slug(company_name: str) -> str:
 def _no_store(response):
     response["Cache-Control"] = "no-store, private, max-age=0"
     response["Pragma"] = "no-cache"
+    return response
+
+
+def _app_uuid_from_id(app_id):
+    match = APP_ID_RE.fullmatch(str(app_id or "").strip())
+    return uuid.UUID(hex=match.group(1)) if match else None
+
+
+def _placement_frame_sources(placement):
+    sources = []
+    candidates = [placement.website_url, *placement.allowed_domain_list]
+    for raw_value in candidates:
+        value = str(raw_value or "").strip().lower().rstrip("/")
+        if not value:
+            continue
+        wildcard = value.startswith("*.") or value.startswith("https://*.")
+        if value.startswith("https://*."):
+            parse_value = "https://" + value[len("https://*.") :]
+        elif value.startswith("*."):
+            parse_value = "https://" + value[2:]
+        elif "://" not in value:
+            parse_value = "https://" + value
+        else:
+            parse_value = value
+        parsed = urlparse(parse_value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            continue
+        host = parsed.hostname.lower()
+        try:
+            port = f":{parsed.port}" if parsed.port else ""
+        except ValueError:
+            continue
+        source = f"{parsed.scheme}://{'*.' if wildcard else ''}{host}{port}"
+        if source not in sources:
+            sources.append(source)
+    return sources
+
+
+def _placement_referrer_allowed(placement, request):
+    referer = str(request.headers.get("Referer") or "").strip()
+    if not referer:
+        return True
+    parsed = urlparse(referer)
+    referer_host = str(parsed.hostname or "").lower()
+    if not referer_host:
+        return False
+    request_host = str(request.get_host() or "").split(":", 1)[0].lower()
+    if referer_host == request_host:
+        return True
+    for source in _placement_frame_sources(placement):
+        wildcard = source.startswith("https://*.") or source.startswith("http://*.")
+        source_host = str(urlparse(source.replace("*.", "")).hostname or "").lower()
+        if wildcard and referer_host.endswith(f".{source_host}"):
+            return True
+        if not wildcard and referer_host == source_host:
+            return True
+    return False
+
+
+def _apply_placement_frame_policy(response, placement):
+    sources = ["'self'", *_placement_frame_sources(placement)]
+    response["Content-Security-Policy"] = f"frame-ancestors {' '.join(dict.fromkeys(sources))}"
+    response["X-Robots-Tag"] = "noindex, nofollow"
+    response.xframe_options_exempt = True
     return response
 
 
@@ -558,8 +623,8 @@ def wall_session(request, visit_id):
             "currency_icon_url": currency_icon_url,
         },
     )
-    if visit.placement_id:
-        response.xframe_options_exempt = True
+    if placement:
+        _apply_placement_frame_policy(response, placement)
     return _no_store(response)
 
 
@@ -666,10 +731,9 @@ def _placement_from_app_id(publisher, app_id):
     value = str(app_id or "").strip()
     if not value:
         return None
-    match = APP_ID_RE.fullmatch(value)
-    if not match:
+    placement_uuid = _app_uuid_from_id(value)
+    if not placement_uuid:
         raise ValueError("Invalid app_id.")
-    placement_uuid = uuid.UUID(hex=match.group(1))
     placement = PublisherPlacement.objects.filter(
         publisher=publisher,
         public_id=placement_uuid,
@@ -786,12 +850,12 @@ def offers_api(request):
 @require_GET
 def offer_click_tracking(request):
     app_id = str(request.GET.get("app_id") or "").strip()
-    match = APP_ID_RE.fullmatch(app_id)
-    if not match:
+    placement_uuid = _app_uuid_from_id(app_id)
+    if not placement_uuid:
         return _error(request, "Invalid placement", "A valid app_id is required.")
     placement = get_object_or_404(
         PublisherPlacement.objects.select_related("publisher"),
-        public_id=uuid.UUID(hex=match.group(1)),
+        public_id=placement_uuid,
         status=PublisherPlacement.Status.ACTIVE,
         publisher__is_active=True,
     )
@@ -927,9 +991,11 @@ def _supplier_portal_context(publisher, active_page):
 
 def _placement_embed_details(request, placement):
     base_url = request.build_absolute_uri(
-        reverse("offerwall:placement-embed", kwargs={"placement_id": placement.public_id})
+        reverse("offerwall:placement-app-embed", kwargs={"app_id": placement.app_id})
     )
     iframe_url = f"{base_url}?SID={{SID}}"
+    iframe_script_url = request.build_absolute_uri(f"{static('offerwall/embed.js')}?v=1")
+    iframe_id = f"rmw-offerwall-{placement.public_id.hex[:10]}"
     api_url = request.build_absolute_uri(reverse("offerwall:offers-api"))
     placement.embed_preview_url = base_url
     placement.direct_url = iframe_url
@@ -939,12 +1005,14 @@ def _placement_embed_details(request, placement):
         f"&app_id={placement.app_id}&platform=All&country=All&type=live_surveys"
     )
     placement.iframe_code = (
-        f'<iframe src="{iframe_url}" title="RM Wins Offer Wall" '
-        'allow="clipboard-write" width="100%" height="800px" '
-        'style="border:0; min-height:800px;" scrolling="auto" frameborder="0">'
-        '</iframe>\n'
-        f'<a href="{iframe_url}" target="_blank">'
-        'iFrames are required to see this page. Please click here!</a>'
+        f'<iframe id="{iframe_id}" class="rmw-offerwall-frame" '
+        f'data-rmw-app-id="{placement.app_id}" src="{iframe_url}" '
+        'title="RM Wins Offer Wall" width="100%" height="800" loading="lazy" '
+        'referrerpolicy="strict-origin" '
+        'style="display:block;width:100%;min-height:600px;border:0;"></iframe>\n'
+        f'<script src="{iframe_script_url}" defer></script>\n'
+        f'<noscript><a href="{iframe_url}" target="_blank" rel="noopener">'
+        'Open RM Wins Offer Wall</a></noscript>'
     )
     return placement
 
@@ -1364,21 +1432,27 @@ def publisher_section(request, section):
     return _no_store(render(request, "offerwall/publisher_placeholder.html", context))
 
 
-@xframe_options_exempt
-@require_GET
-def placement_embed(request, placement_id):
+def _placement_embed_response(request, placement):
     if _rate_limited(
         request,
         "placement-entry",
         settings.OFFERWALL_ENTRY_RATE_LIMIT_PER_MINUTE,
     ):
-        return _error(request, "Too many requests", "Please wait a minute and try again.", status=429)
-    placement = get_object_or_404(
-        PublisherPlacement.objects.select_related("publisher"),
-        public_id=placement_id,
-        status=PublisherPlacement.Status.ACTIVE,
-        publisher__is_active=True,
-    )
+        response = _error(
+            request,
+            "Too many requests",
+            "Please wait a minute and try again.",
+            status=429,
+        )
+        return _apply_placement_frame_policy(response, placement)
+    if not _placement_referrer_allowed(placement, request):
+        response = _error(
+            request,
+            "Domain not allowed",
+            "This placement is not configured for the website embedding it.",
+            status=403,
+        )
+        return _apply_placement_frame_policy(response, placement)
     external_user_id = str(
         request.GET.get("SID")
         or request.GET.get(placement.respondent_id_parameter)
@@ -1386,18 +1460,22 @@ def placement_embed(request, placement_id):
     ).strip()
     if (
         not external_user_id
-        or "{{" in external_user_id
-        or "}}" in external_user_id
+        or "{" in external_user_id
+        or "}" in external_user_id
     ):
         response = render(
             request,
             "offerwall/placement_embed.html",
             {"placement": placement},
         )
-        response["X-Robots-Tag"] = "noindex, nofollow"
-        return _no_store(response)
+        return _no_store(_apply_placement_frame_policy(response, placement))
     if not USER_ID_RE.fullmatch(external_user_id):
-        return _error(request, "Invalid respondent ID", "Use a valid respondent identifier.")
+        response = _error(
+            request,
+            "Invalid respondent ID",
+            "Use a valid respondent identifier.",
+        )
+        return _apply_placement_frame_policy(response, placement)
     visit = create_api_visit(
         placement.publisher,
         external_user_id=external_user_id,
@@ -1412,6 +1490,34 @@ def placement_embed(request, placement_id):
         gaid=request.GET.get("gaid", ""),
     )
     return _no_store(HttpResponseRedirect(session_url(visit)))
+
+
+@xframe_options_exempt
+@require_GET
+def placement_app_embed(request, app_id):
+    placement_uuid = _app_uuid_from_id(app_id)
+    if not placement_uuid:
+        return _error(request, "Invalid placement", "Use a valid RM Wins App ID.", status=404)
+    placement = get_object_or_404(
+        PublisherPlacement.objects.select_related("publisher"),
+        public_id=placement_uuid,
+        status=PublisherPlacement.Status.ACTIVE,
+        publisher__is_active=True,
+    )
+    return _placement_embed_response(request, placement)
+
+
+@xframe_options_exempt
+@require_GET
+def placement_embed(request, placement_id):
+    """Legacy UUID embed route retained for existing publisher snippets."""
+    placement = get_object_or_404(
+        PublisherPlacement.objects.select_related("publisher"),
+        public_id=placement_id,
+        status=PublisherPlacement.Status.ACTIVE,
+        publisher__is_active=True,
+    )
+    return _placement_embed_response(request, placement)
 
 
 @require_GET

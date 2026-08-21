@@ -69,4 +69,33 @@
   sort.addEventListener('change', refresh);
 })();
 </script>{% endif %}
+{% if placement %}<script>
+(() => {
+  if (window.parent === window || !document.referrer) return;
+  let parentOrigin;
+  try { parentOrigin = new URL(document.referrer).origin; } catch (error) { return; }
+  if (!/^https?:\/\//.test(parentOrigin)) return;
+  let scheduled = false;
+  const sendHeight = () => {
+    scheduled = false;
+    const height = Math.max(
+      document.documentElement.scrollHeight,
+      document.body ? document.body.scrollHeight : 0
+    );
+    window.parent.postMessage(
+      {type: 'rmw:resize', appId: '{{ placement.app_id|escapejs }}', height},
+      parentOrigin
+    );
+  };
+  const schedule = () => {
+    if (scheduled) return;
+    scheduled = true;
+    window.requestAnimationFrame(sendHeight);
+  };
+  window.addEventListener('load', schedule);
+  window.addEventListener('resize', schedule);
+  if ('ResizeObserver' in window) new ResizeObserver(schedule).observe(document.body);
+  schedule();
+})();
+</script>{% endif %}
 {% endblock %}
