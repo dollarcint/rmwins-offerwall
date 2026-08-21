@@ -3,7 +3,7 @@
 {% block content %}
 <section class="ow-publisher-shell">
   <header class="ow-publisher-heading">
-    <div><span class="ow-eyebrow"><i></i> Publisher dashboard</span><h1>{{ portal_publisher.name }}</h1><p>Verified rewards, payout balance and withdrawal history.</p></div>
+    <div><span class="ow-eyebrow"><i></i> Supplier dashboard</span><h1>Welcome back.</h1><p>Monitor your placements, verified traffic and earnings from one workspace.</p></div>
     <span class="ow-session-pill">Currency <strong>{{ wallet.currency }}</strong></span>
   </header>
   <div class="ow-wallet-grid">
@@ -13,7 +13,7 @@
     <article><small>Paid</small><strong>{{ wallet.currency }} {{ wallet.paid|floatformat:2 }}</strong><span>Completed withdrawals</span></article>
   </div>
   <div class="ow-publisher-stats">
-    <span><strong>{{ stats.clicks }}</strong> Clicks</span><span><strong>{{ stats.users }}</strong> Users</span><span><strong>{{ stats.verified_completes }}</strong> Verified completes</span>
+    <span><strong>{{ placement_count }}</strong> Placements</span><span><strong>{{ stats.clicks }}</strong> Clicks</span><span><strong>{{ stats.users }}</strong> Respondents</span><span><strong>{{ stats.verified_completes }}</strong> Verified completes</span>
   </div>
   <div class="ow-publisher-layout">
     <section class="ow-panel">
@@ -23,7 +23,7 @@
       {% empty %}<tr><td colspan="5" class="ow-table-empty">No verified reward activity yet.</td></tr>{% endfor %}
       </tbody></table></div>
     </section>
-    <aside class="ow-panel ow-withdrawal-panel">
+    <aside class="ow-panel ow-withdrawal-panel" id="cashout">
       <header><div><span class="ow-eyebrow"><i></i> Payouts</span><h2>Request withdrawal</h2></div></header>
       <p>Minimum payout: {{ wallet.currency }} {{ wallet.minimum_payout|floatformat:2 }}</p>
       <form action="{% url 'offerwall:publisher-withdrawal' %}" method="post" class="ow-withdrawal-form">{% csrf_token %}

@@ -1,9 +1,11 @@
+import re
+
 from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 
-from .models import Publisher
+from .models import Publisher, PublisherPlacement
 from .security import generate_signing_secret
 
 
@@ -132,4 +134,87 @@ class SupplierSignupForm(forms.Form):
                 validate_password(password, user=candidate)
             except ValidationError as exc:
                 self.add_error("password1", exc)
+        return cleaned
+
+
+class PublisherPlacementForm(forms.ModelForm):
+    class Meta:
+        model = PublisherPlacement
+        fields = [
+            "platform",
+            "name",
+            "website_name",
+            "website_url",
+            "postback_url",
+            "currency",
+            "currency_multiplier",
+            "respondent_id_parameter",
+            "campaign_id_parameter",
+            "affiliate_sub_parameter",
+        ]
+        labels = {
+            "postback_url": "Base postback URL",
+            "respondent_id_parameter": "Respondent ID variable",
+            "campaign_id_parameter": "Campaign ID variable",
+            "affiliate_sub_parameter": "Affiliate sub variable",
+        }
+        widgets = {
+            "name": forms.TextInput(attrs={"placeholder": "e.g. Main rewards wall"}),
+            "website_name": forms.TextInput(attrs={"placeholder": "e.g. My Rewards App"}),
+            "website_url": forms.URLInput(attrs={"placeholder": "https://example.com"}),
+            "postback_url": forms.URLInput(
+                attrs={"placeholder": "https://example.com/postback (optional)"}
+            ),
+            "currency": forms.TextInput(attrs={"placeholder": "USD", "maxlength": 3}),
+            "currency_multiplier": forms.NumberInput(
+                attrs={"step": "0.000001", "min": "0.000001"}
+            ),
+            "respondent_id_parameter": forms.TextInput(attrs={"placeholder": "uid"}),
+            "campaign_id_parameter": forms.TextInput(attrs={"placeholder": "campaign_id"}),
+            "affiliate_sub_parameter": forms.TextInput(attrs={"placeholder": "subid"}),
+        }
+
+    def __init__(self, *args, publisher=None, **kwargs):
+        self.publisher = publisher
+        super().__init__(*args, **kwargs)
+
+    def clean_currency(self):
+        currency = str(self.cleaned_data.get("currency") or "").strip().upper()
+        if not re.fullmatch(r"[A-Z]{3}", currency):
+            raise ValidationError("Enter a three-letter currency code such as USD.")
+        return currency
+
+    def clean_website_url(self):
+        return self._secure_url("website_url", required=True)
+
+    def clean_postback_url(self):
+        return self._secure_url("postback_url", required=False)
+
+    def _secure_url(self, field_name, *, required):
+        value = str(self.cleaned_data.get(field_name) or "").strip()
+        if not value and not required:
+            return ""
+        if not value.lower().startswith("https://"):
+            raise ValidationError("Use an HTTPS URL.")
+        return value
+
+    def clean(self):
+        cleaned = super().clean()
+        parameter_fields = (
+            "respondent_id_parameter",
+            "campaign_id_parameter",
+            "affiliate_sub_parameter",
+        )
+        values = [str(cleaned.get(field) or "").casefold() for field in parameter_fields]
+        if all(values) and len(set(values)) != len(values):
+            raise ValidationError("Each variable mapping must use a different parameter name.")
+        if self.publisher and cleaned.get("name"):
+            duplicate = PublisherPlacement.objects.filter(
+                publisher=self.publisher,
+                name__iexact=str(cleaned["name"]).strip(),
+            )
+            if self.instance.pk:
+                duplicate = duplicate.exclude(pk=self.instance.pk)
+            if duplicate.exists():
+                self.add_error("name", "You already have a placement with this name.")
         return cleaned

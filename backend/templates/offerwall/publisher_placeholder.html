@@ -1,0 +1,12 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}{{ section_title }} · {{ portal_publisher.name }}{% endblock %}
+{% block content %}
+<section class="ow-portal-page">
+  <header class="ow-page-heading"><div><span class="ow-eyebrow"><i></i> Supplier workspace</span><h1>{{ section_title }}</h1><p>{{ section_description }}</p></div><span class="ow-coming-pill">Next module</span></header>
+  <section class="ow-module-placeholder">
+    <span aria-hidden="true">⌁</span><h2>{{ section_title }} is ready in navigation</h2>
+    <p>We have reserved this section in the supplier portal. Its data flow and controls will be implemented in the next module without changing the dashboard or placements.</p>
+    <a href="{% url 'offerwall:publisher-placements' %}">Continue with placements →</a>
+  </section>
+</section>
+{% endblock %}

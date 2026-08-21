@@ -4,6 +4,7 @@ import re
 import secrets
 from datetime import datetime, timezone as datetime_timezone
 from decimal import Decimal
+from urllib.parse import urlparse
 
 from django.conf import settings
 from django.contrib import messages
@@ -13,12 +14,13 @@ from django.core.cache import caches
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Q
-from django.http import HttpResponseRedirect, JsonResponse
+from django.http import Http404, HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
+from django.views.decorators.clickjacking import xframe_options_exempt
 
 from accounts.throttling import (
     consume_login_attempt,
@@ -27,11 +29,12 @@ from accounts.throttling import (
 )
 from surveys.models import Survey, SurveyAttempt
 
-from .forms import SupplierLoginForm, SupplierSignupForm
+from .forms import PublisherPlacementForm, SupplierLoginForm, SupplierSignupForm
 from .models import (
     OfferClick,
     PostbackDelivery,
     Publisher,
+    PublisherPlacement,
     PublisherPortalAccount,
     PublisherPayoutRequest,
     RewardLedgerEntry,
@@ -506,6 +509,8 @@ def wall_session(request, visit_id):
             "offer_count": len(offers),
         },
     )
+    if visit.placement_id:
+        response.xframe_options_exempt = True
     return _no_store(response)
 
 
@@ -690,14 +695,13 @@ def publisher_access(request, publisher_slug):
     return _no_store(HttpResponseRedirect(reverse("offerwall:publisher-dashboard")))
 
 
-@require_GET
-def publisher_dashboard(request):
+def _publisher_portal_or_response(request):
     supplier_account = _supplier_account(request)
     if supplier_account and (
         supplier_account.status != PublisherPortalAccount.Status.APPROVED
         or not supplier_account.publisher.is_active
     ):
-        return _no_store(
+        return None, _no_store(
             render(
                 request,
                 "offerwall/supplier_status.html",
@@ -709,12 +713,195 @@ def publisher_dashboard(request):
         )
     publisher = _portal_publisher(request)
     if not publisher:
-        return _error(
+        return None, _error(
             request,
             "Publisher access required",
-            "Open a fresh signed dashboard link supplied by RM Wins.",
+            "Sign in with an approved supplier account to continue.",
             status=403,
         )
+    return publisher, None
+
+
+def _supplier_portal_context(publisher, active_page):
+    return {
+        "portal_publisher": publisher,
+        "supplier_portal_enabled": True,
+        "supplier_active_page": active_page,
+    }
+
+
+def _placement_embed_details(request, placement):
+    base_url = request.build_absolute_uri(
+        reverse("offerwall:placement-embed", kwargs={"placement_id": placement.public_id})
+    )
+    embed_url = (
+        f"{base_url}?{placement.respondent_id_parameter}={{{{USER_ID}}}}"
+        f"&{placement.campaign_id_parameter}={{{{CAMPAIGN_ID}}}}"
+        f"&{placement.affiliate_sub_parameter}={{{{SUB_ID}}}}"
+    )
+    placement.embed_preview_url = base_url
+    placement.iframe_code = (
+        f'<iframe src="{embed_url}" title="RM Wins survey offerwall" '
+        'width="100%" height="720" style="border:0;border-radius:16px" '
+        'loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe>'
+    )
+    return placement
+
+
+@require_http_methods(["GET", "POST"])
+def publisher_placements(request):
+    publisher, denied = _publisher_portal_or_response(request)
+    if denied:
+        return denied
+    form = PublisherPlacementForm(
+        request.POST or None,
+        publisher=publisher,
+        initial={"currency": publisher.currency},
+    )
+    if request.method == "POST" and form.is_valid():
+        placement = form.save(commit=False)
+        placement.publisher = publisher
+        placement.save()
+        messages.success(
+            request,
+            f"Placement “{placement.name}” created. Your iframe is ready below.",
+        )
+        return _no_store(
+            HttpResponseRedirect(
+                f"{reverse('offerwall:publisher-placements')}#placement-{placement.public_id}"
+            )
+        )
+    placements = list(
+        publisher.placements.annotate(
+            visit_count=Count("visits", distinct=True),
+            click_count=Count("visits__clicks", distinct=True),
+        )
+    )
+    for placement in placements:
+        _placement_embed_details(request, placement)
+    context = _supplier_portal_context(publisher, "placements")
+    context.update(
+        {
+            "form": form,
+            "placements": placements,
+            "active_placements": sum(item.is_active for item in placements),
+        }
+    )
+    return _no_store(render(request, "offerwall/publisher_placements.html", context))
+
+
+SUPPLIER_SECTION_COPY = {
+    "respondents": (
+        "Respondents",
+        "Respondent activity, unique users and engagement details will live here.",
+    ),
+    "survey-results": (
+        "Survey results",
+        "Completion, termination and quota outcomes will be available here.",
+    ),
+    "general-details": (
+        "General details",
+        "Company, integration and notification settings will be managed here.",
+    ),
+    "reports": (
+        "Reports",
+        "Downloadable traffic, conversion and earnings reports are coming next.",
+    ),
+    "leads": (
+        "Leads",
+        "Lead events and qualification details will be available here.",
+    ),
+    "open-answers": (
+        "Open-ended answers",
+        "Open-text response exports will be available here when enabled.",
+    ),
+}
+
+
+@require_GET
+def publisher_section(request, section):
+    if section not in SUPPLIER_SECTION_COPY:
+        raise Http404
+    publisher, denied = _publisher_portal_or_response(request)
+    if denied:
+        return denied
+    title, description = SUPPLIER_SECTION_COPY[section]
+    context = _supplier_portal_context(publisher, section)
+    context.update({"section_title": title, "section_description": description})
+    return _no_store(render(request, "offerwall/publisher_placeholder.html", context))
+
+
+def _placement_referrer_allowed(placement, request):
+    referer = str(request.headers.get("Referer") or "").strip()
+    if not referer:
+        return False
+    allowed_host = str(urlparse(placement.website_url).hostname or "").lower()
+    referer_host = str(urlparse(referer).hostname or "").lower()
+    allowed_host = allowed_host.removeprefix("www.")
+    referer_host = referer_host.removeprefix("www.")
+    return bool(
+        allowed_host
+        and referer_host
+        and (
+            referer_host == allowed_host
+            or referer_host.endswith(f".{allowed_host}")
+        )
+    )
+
+
+@xframe_options_exempt
+@require_GET
+def placement_embed(request, placement_id):
+    if _rate_limited(
+        request,
+        "placement-entry",
+        settings.OFFERWALL_ENTRY_RATE_LIMIT_PER_MINUTE,
+    ):
+        return _error(request, "Too many requests", "Please wait a minute and try again.", status=429)
+    placement = get_object_or_404(
+        PublisherPlacement.objects.select_related("publisher"),
+        public_id=placement_id,
+        is_active=True,
+        publisher__is_active=True,
+    )
+    external_user_id = str(
+        request.GET.get(placement.respondent_id_parameter) or ""
+    ).strip()
+    if (
+        not external_user_id
+        or "{{" in external_user_id
+        or "}}" in external_user_id
+    ):
+        response = render(
+            request,
+            "offerwall/placement_embed.html",
+            {"placement": placement},
+        )
+        response["X-Robots-Tag"] = "noindex, nofollow"
+        return _no_store(response)
+    if not USER_ID_RE.fullmatch(external_user_id):
+        return _error(request, "Invalid respondent ID", "Use a valid respondent identifier.")
+    if not _placement_referrer_allowed(placement, request):
+        return _error(
+            request,
+            "Placement domain mismatch",
+            "This placement is not authorized for the referring website.",
+            status=403,
+        )
+    visit = create_api_visit(
+        placement.publisher,
+        external_user_id=external_user_id,
+        request=request,
+        placement=placement,
+    )
+    return _no_store(HttpResponseRedirect(session_url(visit)))
+
+
+@require_GET
+def publisher_dashboard(request):
+    publisher, denied = _publisher_portal_or_response(request)
+    if denied:
+        return denied
     wallet = wallet_summary(publisher)
     stats = publisher.offer_clicks.aggregate(
         clicks=Count("id"),
@@ -731,9 +918,10 @@ def publisher_dashboard(request):
         request,
         "offerwall/publisher_dashboard.html",
         {
-            "portal_publisher": publisher,
+            **_supplier_portal_context(publisher, "dashboard"),
             "wallet": wallet,
             "stats": stats,
+            "placement_count": publisher.placements.count(),
             "ledger_entries": publisher.reward_ledger.select_related("survey")[:25],
             "payout_requests": publisher.payout_requests.all()[:20],
             "payout_methods": ("Bank transfer", "PayPal", "Wise", "Other"),

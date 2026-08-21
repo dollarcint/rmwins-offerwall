@@ -37,7 +37,7 @@
         {% if offer.device %}<span>{{ offer.device }}</span>{% endif %}
         {% if offer.survey_type %}<span>{{ offer.survey_type }}</span>{% endif %}
       </div>
-      <a class="ow-start" href="{{ offer.click_url }}">Start survey <span aria-hidden="true">→</span></a>
+      <a class="ow-start" href="{{ offer.click_url }}" target="_top">Start survey <span aria-hidden="true">→</span></a>
     </article>{% endfor %}
   </div>
   <p class="ow-no-results" id="noResults" hidden>No survey matches this search.</p>

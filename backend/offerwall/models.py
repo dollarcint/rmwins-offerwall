@@ -188,11 +188,104 @@ class OfferOverride(models.Model):
         return f"{self.publisher.slug} · {self.survey.local_id}"
 
 
+class PublisherPlacement(models.Model):
+    """Supplier-managed website placement used to embed the offerwall."""
+
+    class Platform(models.TextChoices):
+        RESPONSIVE = "responsive", "Responsive web"
+        DESKTOP = "desktop", "Desktop"
+        MOBILE = "mobile", "Mobile"
+
+    PARAMETER_VALIDATOR = RegexValidator(
+        r"^[A-Za-z][A-Za-z0-9_]{0,31}$",
+        "Use 1–32 letters, numbers or underscores and start with a letter.",
+    )
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    publisher = models.ForeignKey(
+        Publisher,
+        on_delete=models.CASCADE,
+        related_name="placements",
+    )
+    platform = models.CharField(
+        max_length=12,
+        choices=Platform.choices,
+        default=Platform.RESPONSIVE,
+    )
+    name = models.CharField(max_length=120)
+    website_name = models.CharField(max_length=160)
+    website_url = models.URLField(max_length=500)
+    postback_url = models.URLField(
+        max_length=2000,
+        blank=True,
+        help_text="Optional placement-specific HTTPS outcome endpoint.",
+    )
+    currency = models.CharField(max_length=3, default="USD")
+    currency_multiplier = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        default=Decimal("1.000000"),
+        validators=[
+            MinValueValidator(Decimal("0.000001")),
+            MaxValueValidator(Decimal("100000.000000")),
+        ],
+    )
+    respondent_id_parameter = models.CharField(
+        max_length=32,
+        default="uid",
+        validators=[PARAMETER_VALIDATOR],
+    )
+    campaign_id_parameter = models.CharField(
+        max_length=32,
+        default="campaign_id",
+        validators=[PARAMETER_VALIDATOR],
+    )
+    affiliate_sub_parameter = models.CharField(
+        max_length=32,
+        default="subid",
+        validators=[PARAMETER_VALIDATOR],
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["publisher", "name"],
+                name="unique_publisher_placement_name",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["publisher", "is_active", "-created_at"],
+                name="placement_active_idx",
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        self.name = str(self.name or "").strip()
+        self.website_name = str(self.website_name or "").strip()
+        self.currency = str(self.currency or "USD").strip().upper()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.publisher.slug} · {self.name}"
+
+
 class WallVisit(models.Model):
     """Short-lived, signed browser session without creating a respondent account."""
 
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     publisher = models.ForeignKey(Publisher, on_delete=models.PROTECT, related_name="wall_visits")
+    placement = models.ForeignKey(
+        PublisherPlacement,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="visits",
+    )
     external_user_id = models.CharField(max_length=160, db_index=True)
     entry_nonce = models.CharField(max_length=80)
     country_code = models.CharField(max_length=8, blank=True, db_index=True)

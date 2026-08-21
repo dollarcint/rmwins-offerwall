@@ -10,7 +10,37 @@
   {% include 'includes/favicon_links.html' %}
   <link rel="stylesheet" href="{% static 'offerwall/offerwall.css' %}?v=2">
 </head>
-<body>
+<body{% if supplier_portal_enabled %} class="ow-supplier-body"{% endif %}>
+  {% if supplier_portal_enabled %}
+  <div class="ow-supplier-app">
+    <aside class="ow-supplier-sidebar">
+      <a class="ow-supplier-brand" href="{% url 'offerwall:publisher-dashboard' %}" aria-label="RM Wins supplier dashboard">
+        <span class="ow-brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span><strong>RM Wins</strong><small>Supplier portal</small></span>
+      </a>
+      <nav class="ow-supplier-nav" aria-label="Supplier portal navigation">
+        <a class="{% if supplier_active_page == 'dashboard' %}active{% endif %}" href="{% url 'offerwall:publisher-dashboard' %}"><span aria-hidden="true">▦</span>Dashboard</a>
+        <a class="{% if supplier_active_page == 'placements' %}active{% endif %}" href="{% url 'offerwall:publisher-placements' %}"><span aria-hidden="true">▣</span>Placements</a>
+        <a class="{% if supplier_active_page == 'respondents' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'respondents' %}"><span aria-hidden="true">◎</span>Respondents</a>
+        <a class="{% if supplier_active_page == 'survey-results' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'survey-results' %}"><span aria-hidden="true">✓</span>Survey results</a>
+        <a class="{% if supplier_active_page == 'general-details' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'general-details' %}"><span aria-hidden="true">◫</span>General details</a>
+        <a class="{% if supplier_active_page == 'reports' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'reports' %}"><span aria-hidden="true">⌁</span>Reports</a>
+        <a href="{% url 'offerwall:publisher-dashboard' %}#cashout"><span aria-hidden="true">₹</span>Cashout</a>
+        <a class="{% if supplier_active_page == 'leads' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'leads' %}"><span aria-hidden="true">◇</span>Leads</a>
+        <a class="{% if supplier_active_page == 'open-answers' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'open-answers' %}"><span aria-hidden="true">≡</span>Open-ended answers</a>
+      </nav>
+      <div class="ow-supplier-account">
+        <div><span>{{ portal_publisher.name|slice:':1'|upper }}</span><p><strong>{{ portal_publisher.name }}</strong><small>Approved supplier</small></p></div>
+        <form action="{% url 'offerwall:publisher-logout' %}" method="post">{% csrf_token %}<button type="submit">Sign out</button></form>
+      </div>
+    </aside>
+    <section class="ow-supplier-stage">
+      <header class="ow-supplier-toolbar">
+        <div><small>Supplier workspace</small><strong>{{ portal_publisher.name }}</strong></div>
+        <a href="{% url 'offerwall:publisher-placements' %}">+ New placement</a>
+      </header>
+      <main class="ow-supplier-main">
+  {% else %}
   <header class="ow-topbar">
     <a class="ow-brand" href="/" aria-label="RM Wins Offerwall home">
       <span class="ow-brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
@@ -30,12 +60,19 @@
     {% endif %}
   </header>
   <main>
+  {% endif %}
     {% if messages %}<div class="ow-messages" aria-live="polite">{% for message in messages %}<div class="{{ message.tags }}">{{ message }}</div>{% endfor %}</div>{% endif %}
     {% block content %}{% endblock %}
+  {% if supplier_portal_enabled %}
+      </main>
+    </section>
+  </div>
+  {% else %}
   </main>
   <footer class="ow-footer">
     <span>© {% now "Y" %} RM Wins Insights</span>
     <span>Signed sessions · Verified rewards · Private tracking</span>
   </footer>
+  {% endif %}
 </body>
 </html>

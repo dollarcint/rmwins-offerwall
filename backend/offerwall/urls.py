@@ -25,11 +25,26 @@ urlpatterns = [
     ),
     path("publisher/", views.publisher_dashboard, name="publisher-dashboard"),
     path(
+        "publisher/placements/",
+        views.publisher_placements,
+        name="publisher-placements",
+    ),
+    path(
+        "publisher/sections/<slug:section>/",
+        views.publisher_section,
+        name="publisher-section",
+    ),
+    path(
         "publisher/withdrawals/",
         views.publisher_request_withdrawal,
         name="publisher-withdrawal",
     ),
     path("publisher/logout/", views.publisher_logout, name="publisher-logout"),
+    path(
+        "embed/<uuid:placement_id>/",
+        views.placement_embed,
+        name="placement-embed",
+    ),
     path("operations/", views.offerwall_operations, name="operations"),
     path(
         "operations/action/",

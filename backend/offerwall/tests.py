@@ -18,6 +18,7 @@ from .models import (
     OfferOverride,
     PostbackDelivery,
     Publisher,
+    PublisherPlacement,
     PublisherPortalAccount,
     PublisherPayoutRequest,
     RewardLedgerEntry,
@@ -493,6 +494,137 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(registration.status, PublisherPortalAccount.Status.APPROVED)
         self.assertEqual(registration.reviewed_by, operator)
         self.assertTrue(publisher.is_active)
+
+    def _open_supplier_session(self, publisher=None, *, suffix="portal"):
+        publisher = publisher or self.publisher
+        user = get_user_model().objects.create_user(
+            username=f"supplier-{suffix}",
+            email=f"supplier-{suffix}@example.test",
+            password="Strong-Pass-893!",
+        )
+        PublisherPortalAccount.objects.create(
+            user=user,
+            publisher=publisher,
+            contact_name="Supplier Owner",
+            business_email=f"supplier-{suffix}@example.test",
+            phone="+91 90000 33333",
+            country="India",
+            status=PublisherPortalAccount.Status.APPROVED,
+        )
+        session = self.client.session
+        session["offerwall_supplier_publisher_id"] = str(publisher.public_id)
+        session.save()
+        return user
+
+    def test_supplier_can_create_placement_and_copy_iframe(self):
+        self._open_supplier_session(suffix="placement")
+        response = self.client.post(
+            reverse("offerwall:publisher-placements"),
+            {
+                "platform": PublisherPlacement.Platform.RESPONSIVE,
+                "name": "Main rewards wall",
+                "website_name": "Rewards Club",
+                "website_url": "https://rewards.example.test",
+                "postback_url": "https://rewards.example.test/postback",
+                "currency": "usd",
+                "currency_multiplier": "1.25",
+                "respondent_id_parameter": "member_id",
+                "campaign_id_parameter": "campaign_id",
+                "affiliate_sub_parameter": "subid",
+            },
+        )
+        placement = PublisherPlacement.objects.get(publisher=self.publisher)
+        self.assertRedirects(
+            response,
+            f"{reverse('offerwall:publisher-placements')}#placement-{placement.public_id}",
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(placement.currency, "USD")
+        page = self.client.get(reverse("offerwall:publisher-placements"))
+        self.assertContains(page, "Main rewards wall")
+        self.assertContains(page, "USER_ID")
+        self.assertContains(page, str(placement.public_id))
+        self.assertContains(page, "Respondents")
+        self.assertContains(page, "Open-ended answers")
+
+    def test_placement_embed_creates_placement_attributed_visit(self):
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Embedded wall",
+            website_name="Publisher Site",
+            website_url="https://publisher.example.test",
+        )
+        path = reverse(
+            "offerwall:placement-embed",
+            kwargs={"placement_id": placement.public_id},
+        )
+        preview = self.client.get(path)
+        self.assertEqual(preview.status_code, 200)
+        self.assertContains(preview, "Placement active")
+        self.assertNotIn("X-Frame-Options", preview)
+
+        response = self.client.get(
+            f"{path}?uid=member-100&campaign_id=summer&subid=home",
+            HTTP_REFERER="https://publisher.example.test/rewards",
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/wall/session/", response["Location"])
+        visit = WallVisit.objects.get(external_user_id="member-100")
+        self.assertEqual(visit.placement, placement)
+        session_location = urlsplit(response["Location"])
+        session_page = self.client.get(
+            f"{session_location.path}?{session_location.query}"
+        )
+        self.assertEqual(session_page.status_code, 200)
+        self.assertNotIn("X-Frame-Options", session_page)
+
+        direct_visit = create_wall_visit(
+            self.publisher,
+            external_user_id="signed-direct-user",
+            nonce="signed-direct-nonce",
+            entry_timestamp=timezone.now(),
+        )
+        direct_session = self.client.get(
+            reverse("offerwall:session", kwargs={"visit_id": direct_visit.public_id}),
+            {"sig": sign_session(self.publisher, direct_visit.public_id)},
+        )
+        self.assertEqual(direct_session["X-Frame-Options"], "DENY")
+
+        blocked = self.client.get(
+            f"{path}?uid=member-101",
+            HTTP_REFERER="https://attacker.example/",
+        )
+        self.assertEqual(blocked.status_code, 403)
+        self.assertFalse(WallVisit.objects.filter(external_user_id="member-101").exists())
+        self.assertEqual(self.client.get(f"{path}?uid=member-102").status_code, 403)
+
+    def test_supplier_placement_list_is_publisher_scoped(self):
+        self._open_supplier_session(suffix="scope")
+        PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Owned placement",
+            website_name="Owned Site",
+            website_url="https://owned.example.test",
+        )
+        other = Publisher.objects.create(name="Other Publisher", slug="other-publisher")
+        PublisherPlacement.objects.create(
+            publisher=other,
+            name="Private other placement",
+            website_name="Other Site",
+            website_url="https://other.example.test",
+        )
+        response = self.client.get(reverse("offerwall:publisher-placements"))
+        self.assertContains(response, "Owned placement")
+        self.assertNotContains(response, "Private other placement")
+
+    def test_supplier_placeholder_section_uses_portal_shell(self):
+        self._open_supplier_session(suffix="placeholder")
+        response = self.client.get(
+            reverse("offerwall:publisher-section", kwargs={"section": "reports"})
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Reports is ready in navigation")
+        self.assertContains(response, "Placements")
 
     def _credit_click(self):
         click = self._click()

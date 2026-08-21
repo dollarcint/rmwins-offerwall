@@ -1,0 +1,74 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}Placements · {{ portal_publisher.name }}{% endblock %}
+{% block content %}
+<section class="ow-portal-page">
+  <header class="ow-page-heading">
+    <div><span class="ow-eyebrow"><i></i> Distribution</span><h1>Placements</h1><p>Create a website placement, map your variables and copy its ready-to-use iframe.</p></div>
+    <div class="ow-page-metrics"><span><strong>{{ placements|length }}</strong>Total</span><span><strong>{{ active_placements }}</strong>Active</span></div>
+  </header>
+
+  <section class="ow-placement-builder">
+    <header><div><small>New placement</small><h2>Configure where your offerwall will run</h2></div><span>Secure iframe</span></header>
+    <form method="post" class="ow-placement-form" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="ow-form-wide ow-field-errors">{{ form.non_field_errors }}</div>{% endif %}
+      <div class="ow-placement-form-grid">
+        <label><span>Platform *</span>{{ form.platform }}{{ form.platform.errors }}</label>
+        <label><span>Placement name *</span>{{ form.name }}{{ form.name.errors }}</label>
+        <label><span>Website name *</span>{{ form.website_name }}{{ form.website_name.errors }}</label>
+        <label><span>Website URL *</span>{{ form.website_url }}{{ form.website_url.errors }}</label>
+        <label><span>Base postback URL</span>{{ form.postback_url }}{{ form.postback_url.errors }}</label>
+        <label><span>Currency *</span>{{ form.currency }}{{ form.currency.errors }}</label>
+        <label><span>Currency multiplier *</span>{{ form.currency_multiplier }}{{ form.currency_multiplier.errors }}</label>
+      </div>
+      <fieldset class="ow-variable-mapping">
+        <legend><span>Variable mapping</span><small>These names become the iframe query parameters supplied by your website.</small></legend>
+        <div class="ow-placement-form-grid three">
+          <label><span>Respondent ID *</span>{{ form.respondent_id_parameter }}{{ form.respondent_id_parameter.errors }}</label>
+          <label><span>Campaign ID *</span>{{ form.campaign_id_parameter }}{{ form.campaign_id_parameter.errors }}</label>
+          <label><span>Affiliate sub *</span>{{ form.affiliate_sub_parameter }}{{ form.affiliate_sub_parameter.errors }}</label>
+        </div>
+      </fieldset>
+      <div class="ow-placement-submit"><p>After saving, replace the iframe placeholders with your own user and campaign values.</p><button type="submit">Create placement <span>→</span></button></div>
+    </form>
+  </section>
+
+  <section class="ow-placement-list">
+    <header><div><small>Your inventory</small><h2>Placement iframe codes</h2></div></header>
+    {% for placement in placements %}
+    <article class="ow-placement-card" id="placement-{{ placement.public_id }}">
+      <header>
+        <div><span class="ow-placement-platform">{{ placement.get_platform_display }}</span><h3>{{ placement.name }}</h3><p>{{ placement.website_name }} · {{ placement.website_url }}</p></div>
+        <span class="ow-placement-state {% if placement.is_active %}active{% endif %}">{% if placement.is_active %}Active{% else %}Inactive{% endif %}</span>
+      </header>
+      <div class="ow-placement-card-stats"><span><strong>{{ placement.visit_count }}</strong>Sessions</span><span><strong>{{ placement.click_count }}</strong>Survey starts</span><span><strong>{{ placement.currency }}</strong>Currency</span><span><strong>{{ placement.currency_multiplier|floatformat:6 }}</strong>Multiplier</span></div>
+      <div class="ow-iframe-grid">
+        <div class="ow-code-panel">
+          <div><h4>Embed code</h4><button type="button" data-copy-target="iframe-{{ placement.public_id }}">Copy iframe</button></div>
+          <textarea id="iframe-{{ placement.public_id }}" readonly rows="8">{{ placement.iframe_code }}</textarea>
+          <p><strong>Required:</strong> replace <code>{% templatetag openvariable %}USER_ID{% templatetag closevariable %}</code>. Campaign and sub placeholders can use your own values.</p>
+        </div>
+        <div class="ow-iframe-preview">
+          <div><h4>Live preview</h4><span>{{ placement.public_id }}</span></div>
+          <iframe src="{{ placement.embed_preview_url }}" title="{{ placement.name }} preview" loading="lazy"></iframe>
+        </div>
+      </div>
+    </article>
+    {% empty %}
+    <div class="ow-placement-empty"><span aria-hidden="true">▣</span><h3>No placements yet</h3><p>Create your first placement above and its iframe will appear here.</p></div>
+    {% endfor %}
+  </section>
+</section>
+<script>
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-copy-target]');
+  if (!button) return;
+  const field = document.getElementById(button.dataset.copyTarget);
+  navigator.clipboard.writeText(field.value).then(() => {
+    const original = button.textContent;
+    button.textContent = 'Copied';
+    setTimeout(() => { button.textContent = original; }, 1600);
+  });
+});
+</script>
+{% endblock %}

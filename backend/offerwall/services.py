@@ -224,12 +224,14 @@ def create_wall_visit(
     nonce: str,
     entry_timestamp,
     request=None,
+    placement=None,
 ) -> WallVisit:
     location = resolve_entry_geolocation(request) if request is not None else {}
     client_data = get_request_client_data(request) if request is not None else {}
     now = timezone.now()
     defaults = {
         "external_user_id": external_user_id,
+        "placement": placement,
         "entry_timestamp": entry_timestamp,
         "expires_at": now + timedelta(seconds=settings.OFFERWALL_VISIT_TTL_SECONDS),
         "country_code": str(location.get("country_code") or "")[:8],
@@ -253,13 +255,20 @@ def create_wall_visit(
     return visit
 
 
-def create_api_visit(publisher: Publisher, *, external_user_id: str, request=None) -> WallVisit:
+def create_api_visit(
+    publisher: Publisher,
+    *,
+    external_user_id: str,
+    request=None,
+    placement=None,
+) -> WallVisit:
     return create_wall_visit(
         publisher,
         external_user_id=external_user_id,
         nonce=secrets.token_urlsafe(24),
         entry_timestamp=timezone.now(),
         request=request,
+        placement=placement,
     )
 
 
