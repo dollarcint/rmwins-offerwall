@@ -5534,3 +5534,438 @@ a {
     width: 100%;
   }
 }
+
+/* RM Wins identity pass: placement workflow keeps the useful structure without
+   carrying another product's navigation, palette or undersized typography. */
+:root {
+  --ou-orange: #226df2;
+  --ou-ink: #142b49;
+  --ou-muted: #66778d;
+  --ou-border: #dce5ee;
+  --ou-bg: #f2f6fa;
+  --rm-navy: #102f57;
+  --rm-deep-navy: #0b2445;
+  --rm-blue: #226df2;
+  --rm-cyan: #23c2ce;
+}
+.ow-supplier-body {
+  color: #243a55;
+  background: var(--ou-bg);
+}
+.ow-supplier-app {
+  grid-template-columns: 270px minmax(0, 1fr);
+}
+.ow-supplier-sidebar {
+  width: auto;
+  padding: 24px 18px 18px;
+  border-right: 0;
+  color: #fff;
+  background: linear-gradient(180deg, var(--rm-navy) 0%, var(--rm-deep-navy) 100%);
+  box-shadow: 12px 0 34px rgba(9, 34, 67, .08);
+}
+.ow-supplier-brand {
+  min-height: 0;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 0 8px 24px;
+  color: #fff;
+}
+.ow-supplier-brand > span:last-child {
+  display: block;
+}
+.ow-supplier-brand .ow-brand-mark {
+  width: 42px;
+  height: 42px;
+  filter: none;
+  background: linear-gradient(145deg, var(--rm-cyan), var(--rm-blue));
+}
+.ow-supplier-brand span:last-child strong {
+  color: #fff;
+  font-size: 18px;
+}
+.ow-supplier-brand span:last-child small {
+  margin-top: 3px;
+  color: #9db8d6;
+  font-size: 10px;
+}
+.ow-supplier-nav {
+  gap: 5px;
+  padding: 4px 0 18px;
+}
+.ow-supplier-nav a {
+  min-height: 48px;
+  margin: 0;
+  gap: 12px;
+  padding: 0 13px;
+  border-radius: 12px;
+  color: #c1d0e1;
+  font-size: 15px;
+  font-weight: 700;
+}
+.ow-supplier-nav a > span {
+  width: 27px;
+  height: 27px;
+  border: 1px solid rgba(255, 255, 255, .13);
+  border-radius: 8px;
+  color: #8eaccd;
+  background: rgba(255, 255, 255, .025);
+}
+.ow-supplier-nav a:hover,
+.ow-supplier-nav a.active {
+  color: #fff;
+  background: rgba(255, 255, 255, .10);
+}
+.ow-supplier-nav a.active {
+  box-shadow: inset 3px 0 var(--rm-cyan);
+}
+.ow-supplier-nav a.active::before {
+  display: none;
+}
+.ow-supplier-nav a.active > span {
+  border-color: rgba(89, 220, 227, .45);
+  color: #67e2e8;
+  background: rgba(35, 194, 206, .14);
+}
+.ow-supplier-account {
+  display: block;
+}
+.ow-supplier-account strong {
+  font-size: 13px;
+}
+.ow-supplier-account small,
+.ow-supplier-account button {
+  font-size: 11px;
+}
+.ow-supplier-stage {
+  margin-left: 0;
+}
+.ow-supplier-toolbar {
+  min-height: 82px;
+  padding: 0 32px;
+  border-bottom-color: #dce5ee;
+  background: rgba(255, 255, 255, .94);
+}
+.ow-supplier-toolbar > div:first-child small {
+  color: #6f8197;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: .9px;
+  text-transform: uppercase;
+}
+.ow-supplier-toolbar > div:first-child strong {
+  margin-top: 5px;
+  color: #173555;
+  font-size: 15px;
+}
+.ow-supplier-toolbar > a,
+.ow-ou-placements-page .ow-add-placement,
+.ow-ou-orange-button,
+.ow-modal-submit,
+.ow-ou-form-actions button:not(.secondary) {
+  color: #fff;
+  background: linear-gradient(135deg, #123d70, var(--rm-blue));
+  box-shadow: 0 10px 24px rgba(34, 109, 242, .18);
+}
+.ow-supplier-toolbar > a {
+  min-height: 42px;
+  padding: 0 17px;
+  font-size: 13px;
+}
+.ow-supplier-main {
+  padding: 32px 30px 70px;
+}
+.ow-ou-placements-page .ow-apps-heading {
+  border-color: #d9e5f0;
+  background: linear-gradient(135deg, #fff 0%, #f6fbff 100%);
+  box-shadow: 0 12px 32px rgba(26, 66, 108, .06);
+}
+.ow-ou-placements-page .ow-apps-heading h1 {
+  color: #142f4f;
+  font-size: 31px;
+}
+.ow-ou-placements-page .ow-apps-heading p {
+  color: #65778e;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.ow-ou-placements-page .ow-add-placement {
+  min-height: 48px;
+  font-size: 15px;
+}
+.ow-ou-placements-page .ow-apps-table-card,
+.ow-ou-settings,
+.ow-ou-card,
+.ow-ou-specific-create {
+  border-color: #dce6ef;
+  box-shadow: 0 12px 32px rgba(26, 58, 93, .055);
+}
+.ow-ou-placements-page .ow-apps-table th {
+  padding: 19px 24px;
+  color: #5b7089;
+  background: #f5f9fc;
+  font-size: 14px;
+}
+.ow-ou-placements-page .ow-apps-table td {
+  padding: 20px 24px;
+  color: #344a62;
+  font-size: 15px;
+}
+.ow-ou-placements-page .ow-app-cell strong {
+  color: #173555;
+  font-size: 16px;
+}
+.ow-ou-placements-page .ow-app-cell small {
+  font-size: 12px;
+}
+.ow-ou-placements-page .ow-platform-pill,
+.ow-ou-placements-page .ow-placement-state {
+  font-size: 13px;
+}
+.ow-ou-placements-page .ow-apps-footer,
+.ow-ou-placements-page .ow-apps-footer nav a,
+.ow-ou-placements-page .ow-apps-footer nav span,
+.ow-ou-placements-page .ow-apps-footer nav b,
+.ow-placement-actions div button,
+.ow-placement-actions div a {
+  font-size: 13px;
+}
+.ow-platform-options label:has(input:checked),
+.ow-ou-traffic label:has(input:checked),
+.ow-ou-content-types label:has(input:checked) {
+  border-color: var(--rm-blue);
+  color: var(--rm-blue);
+  background: #eef5ff;
+  box-shadow: inset 0 0 0 1px var(--rm-blue);
+}
+.ow-placement-create-form legend,
+.ow-placement-url-field > span,
+.ow-placement-url-field input,
+.ow-platform-options label {
+  font-size: 16px;
+}
+.ow-ou-settings-tabs {
+  min-height: 78px;
+  border-bottom-color: #dce6ef;
+  background: #fbfdff;
+}
+.ow-ou-settings-tabs button {
+  min-width: 150px;
+  color: #66788e;
+  font-size: 16px;
+}
+.ow-ou-settings-tabs button i {
+  width: 34px;
+  height: 34px;
+  color: #58708c;
+  background: #edf3f8;
+  font-size: 16px;
+}
+.ow-ou-settings-tabs button.active i {
+  color: var(--rm-blue);
+  background: #eaf2ff;
+}
+.ow-ou-panel {
+  padding: 28px;
+}
+.ow-ou-info {
+  margin-bottom: 26px;
+  padding: 20px;
+  color: #2c68ad;
+  background: #edf6ff;
+  font-size: 15px;
+  line-height: 1.65;
+}
+.ow-ou-card > h2 {
+  padding: 20px 25px;
+  color: #183654;
+  font-size: 17px;
+  letter-spacing: .025em;
+}
+.ow-ou-card > form,
+.ow-ou-card > p,
+.ow-ou-card > .ow-ou-content-types,
+.ow-ou-card > div:not(.ow-ou-content-types) {
+  padding: 26px;
+}
+.ow-ou-general-grid label,
+.ow-ou-currency-grid label,
+.ow-ou-field,
+.ow-ou-general-grid b,
+.ow-ou-currency-grid b,
+.ow-ou-field > b,
+.ow-ou-traffic legend {
+  color: #29445f;
+  font-size: 15px;
+}
+.ow-ou-general-grid input,
+.ow-ou-currency-grid input,
+.ow-ou-currency-grid select,
+.ow-ou-field input,
+.ow-ou-field select {
+  min-height: 48px;
+  border-color: #d8e3ed;
+  font-size: 15px;
+}
+.ow-ou-general-grid small,
+.ow-ou-currency-grid small,
+.ow-ou-help,
+.ow-ou-traffic > p,
+.ow-ou-traffic small,
+.ow-ou-traffic em,
+.ow-ou-optout-card small {
+  font-size: 12px;
+  line-height: 1.55;
+}
+.ow-ou-traffic b,
+.ow-ou-checkbox,
+.ow-ou-ip-check,
+.ow-ou-optout-card .ow-ou-checkbox {
+  font-size: 14px;
+}
+.ow-ou-simulation {
+  border-color: #d8e6f5;
+  background: #f5f9ff;
+}
+.ow-ou-simulation > strong {
+  font-size: 15px;
+}
+.ow-ou-simulation span small,
+.ow-ou-simulation em,
+.ow-ou-simulation > p {
+  font-size: 12px;
+}
+.ow-ou-simulation span b {
+  font-size: 21px;
+}
+.ow-ou-form-actions button,
+.ow-ou-form-actions a,
+.ow-reset-secret,
+.ow-reset-secret button {
+  min-height: 44px;
+  font-size: 14px;
+}
+.ow-ou-subtabs button {
+  font-size: 15px;
+}
+.ow-ou-macros h3,
+.ow-ou-security h3,
+.ow-ou-specific-list h2,
+.ow-ou-doc-section h3,
+.ow-ou-design-title h2,
+.ow-ou-integrations > h2 {
+  color: #183654;
+  font-size: 18px;
+}
+.ow-ou-macros h3 i {
+  color: var(--rm-blue);
+  background: #eaf2ff;
+}
+.ow-ou-macros > p {
+  grid-template-columns: 170px 1fr;
+  font-size: 13px;
+}
+.ow-ou-macros > div,
+.ow-ou-secret-line small,
+.ow-ou-hash-grid span,
+.ow-ou-security > p,
+.ow-ou-secret-line code,
+.ow-ou-secret-line button,
+.ow-ou-hash-grid button,
+.ow-ou-hash-grid pre {
+  font-size: 12px;
+}
+.ow-ou-specific-list header p,
+.ow-ou-specific-create > header p,
+.ow-ou-design-title p {
+  font-size: 13px;
+}
+.ow-ou-specific-list header a {
+  padding: 11px 15px;
+  background: linear-gradient(135deg, #123d70, var(--rm-blue));
+  font-size: 13px;
+}
+.ow-ou-content-types > div > div label {
+  min-height: 64px;
+  font-size: 14px;
+}
+.ow-ou-branding article h3 {
+  font-size: 15px;
+}
+.ow-ou-branding article p,
+.ow-ou-branding article li,
+.ow-ou-branding article > label {
+  font-size: 12px;
+}
+.ow-ou-quick-label,
+.ow-ou-section-kicker {
+  color: var(--rm-blue);
+  font-size: 12px;
+}
+.ow-ou-integration-jumps button {
+  padding: 12px 8px;
+  color: #526a84;
+  font-size: 13px;
+}
+.ow-ou-jump-help,
+.ow-ou-warning {
+  font-size: 12px;
+  line-height: 1.6;
+}
+.ow-ou-doc-section h4 {
+  color: #28435f;
+  font-size: 15px;
+}
+.ow-ou-doc-section > p,
+.ow-ou-doc-section > ul,
+.ow-ou-api-details p,
+.ow-ou-param-list article,
+.ow-ou-url-code {
+  font-size: 13px;
+}
+.ow-ou-param-list article {
+  grid-template-columns: 120px 90px 150px 1fr;
+}
+.ow-ou-param-list b {
+  font-size: 11px;
+}
+.ow-ou-specific-create > header h1 {
+  color: #173555;
+  font-size: 25px;
+}
+
+@media (max-width: 1080px) {
+  .ow-supplier-app {
+    grid-template-columns: 230px minmax(0, 1fr);
+  }
+  .ow-supplier-sidebar {
+    width: auto;
+  }
+  .ow-supplier-nav a {
+    font-size: 14px;
+  }
+  .ow-ou-settings-tabs button {
+    min-width: 132px;
+    font-size: 14px;
+  }
+}
+@media (max-width: 760px) {
+  .ow-supplier-app {
+    display: block;
+  }
+  .ow-supplier-sidebar {
+    width: 100%;
+    height: auto;
+  }
+  .ow-supplier-account {
+    margin-top: 14px;
+  }
+  .ow-supplier-main {
+    padding: 18px 14px 50px;
+  }
+  .ow-ou-settings-tabs {
+    overflow-x: auto;
+  }
+  .ow-ou-param-list article {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,16 +1,16 @@
 {% extends 'offerwall/base.html' %}
-{% block title %}Apps / Placements · {{ portal_publisher.name }}{% endblock %}
+{% block title %}Placements · {{ portal_publisher.name }}{% endblock %}
 {% block content %}
 <section class="ow-apps-page ow-ou-placements-page">
   <header class="ow-apps-heading">
-    <div><h1>Apps / Placements</h1><p>Manage your application placements and track revenue</p></div>
+    <div><h1>Placements</h1><p>Create and manage the survey experiences connected to your websites and apps.</p></div>
     <button class="ow-add-placement" type="button" data-open-placement><span>＋</span>Add Placement</button>
   </header>
 
   <section class="ow-apps-table-card">
     <div class="ow-apps-table-wrap">
       <table class="ow-apps-table">
-        <thead><tr><th>Apps / Placement</th><th>Platform</th><th>Status</th><th>Create Date</th><th>Total Revenue</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Placement</th><th>Platform</th><th>Status</th><th>Created</th><th>Total Revenue</th><th>Actions</th></tr></thead>
         <tbody>
           {% for placement in placements %}<tr>
             <td><div class="ow-app-cell">

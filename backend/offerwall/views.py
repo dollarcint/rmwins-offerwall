@@ -1321,9 +1321,13 @@ def publisher_placement_action(request, placement_id):
 
 
 SUPPLIER_SECTION_COPY = {
-    "offers": (
-        "Offers",
-        "Browse the offers and surveys available for your placements.",
+    "respondents": (
+        "Respondents",
+        "Respondent activity, unique users and engagement details will live here.",
+    ),
+    "survey-results": (
+        "Survey results",
+        "Completion, termination and quota outcomes will be available here.",
     ),
     "general-details": (
         "General details",
@@ -1333,9 +1337,13 @@ SUPPLIER_SECTION_COPY = {
         "Reports",
         "Downloadable traffic, conversion and earnings reports are coming next.",
     ),
-    "developer-docs": (
-        "Developer Docs",
-        "Integration documentation is available inside each placement's Integrations tab.",
+    "leads": (
+        "Leads",
+        "Lead events and qualification details will be available here.",
+    ),
+    "open-answers": (
+        "Open-ended answers",
+        "Open-text response exports will be available here when enabled.",
     ),
 }
 

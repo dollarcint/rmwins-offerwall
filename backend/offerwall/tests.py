@@ -550,13 +550,15 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(placement.website_name, "Rewards")
         self.assertFalse(placement.postback_enabled)
         page = self.client.get(reverse("offerwall:publisher-placements"))
-        self.assertContains(page, "Apps / Placement")
+        self.assertContains(page, "Placement")
         self.assertContains(page, "Total Revenue")
         self.assertContains(page, placement.app_id)
         self.assertContains(page, "Settings")
-        self.assertContains(page, "Offers")
-        self.assertContains(page, "Wallet Ledger")
-        self.assertContains(page, "Developer Docs")
+        self.assertContains(page, "Respondents")
+        self.assertContains(page, "Survey results")
+        self.assertContains(page, "Open-ended answers")
+        self.assertNotContains(page, "Wallet Ledger")
+        self.assertNotContains(page, "Developer Docs")
         settings_page = self.client.get(
             reverse(
                 "offerwall:publisher-placement-edit",
