@@ -8,7 +8,7 @@
   <meta name="description" content="RM Wins secure survey offerwall">
   <title>{% block title %}RM Wins Offerwall{% endblock %}</title>
   {% include 'includes/favicon_links.html' %}
-  <link rel="stylesheet" href="{% static 'offerwall/offerwall.css' %}?v=6">
+  <link rel="stylesheet" href="{% static 'offerwall/offerwall.css' %}?v=7">
 </head>
 <body{% if supplier_portal_enabled %} class="ow-supplier-body"{% endif %}>
   {% if supplier_portal_enabled %}
@@ -32,7 +32,7 @@
     <section class="ow-supplier-stage">
       <header class="ow-supplier-toolbar">
         <div><small>{% if supplier_active_page == 'placements' %}Apps / Placements{% else %}{{ supplier_active_page|title }}{% endif %}</small></div>
-        <span class="ow-ou-notification" aria-label="Notifications">♟</span><details class="ow-ou-account"><summary><strong>${{ portal_wallet.available|floatformat:2 }}</strong><span>{{ portal_publisher.name }}</span><i>{{ portal_publisher.name|slice:':1'|upper }}</i><b>⌄</b></summary><div class="ow-ou-account-menu"><a href="{% url 'offerwall:publisher-section' 'general-details' %}">Profile</a><form action="{% url 'offerwall:publisher-logout' %}" method="post">{% csrf_token %}<button type="submit">Sign out</button></form></div></details>
+        <span class="ow-ou-notification" aria-label="Notifications">♢</span><details class="ow-ou-account"><summary><strong>${{ portal_wallet.available|floatformat:2 }}</strong><span>{{ portal_publisher.name }}</span><i>{{ portal_publisher.name|slice:':1'|upper }}</i><b>⌄</b></summary><div class="ow-ou-account-menu"><a href="{% url 'offerwall:publisher-section' 'general-details' %}">Profile</a><form action="{% url 'offerwall:publisher-logout' %}" method="post">{% csrf_token %}<button type="submit">Sign out</button></form></div></details>
       </header>
       <main class="ow-supplier-main">
   {% else %}

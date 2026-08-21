@@ -14,7 +14,7 @@
         <tbody>
           {% for placement in placements %}<tr>
             <td><div class="ow-app-cell">
-              {% if placement.favicon_url %}<img class="ow-app-favicon-image" src="{{ placement.favicon_url }}" alt="favicon" loading="lazy">{% else %}<span class="ow-app-favicon">{{ placement.website_name|slice:':1'|upper }}</span>{% endif %}
+              <span class="ow-app-favicon-wrap"><span class="ow-app-favicon">{{ placement.website_name|slice:':1'|upper }}</span>{% if placement.favicon_url %}<img class="ow-app-favicon-image" src="{{ placement.favicon_url }}" alt="favicon" loading="lazy" onerror="this.remove()">{% endif %}</span>
               <div><strong>{{ placement.website_name }}</strong><small>ID: {{ placement.app_id }}</small></div>
             </div></td>
             <td><span class="ow-platform-pill {{ placement.platform }}">◎ {{ placement.get_platform_display }}</span></td>

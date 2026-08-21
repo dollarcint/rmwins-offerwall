@@ -5049,6 +5049,22 @@ a {
   color: #8b919c;
   font-size: 21px;
 }
+.ow-app-favicon-wrap {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  position: relative;
+}
+.ow-app-favicon-wrap .ow-app-favicon,
+.ow-app-favicon-wrap .ow-app-favicon-image {
+  position: absolute;
+  inset: 0;
+  width: 38px;
+  height: 38px;
+}
+.ow-app-favicon-wrap .ow-app-favicon-image {
+  z-index: 1;
+}
 .ow-ou-account summary b {
   color: #9ba0a9;
   font-size: 11px;
