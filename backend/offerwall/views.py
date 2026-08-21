@@ -43,9 +43,11 @@ from .models import (
 from .security import (
     digest_api_key,
     generate_signing_secret,
+    sign_placement_access,
     verify_click_signature,
     verify_entry_signature,
     verify_portal_access,
+    verify_placement_access,
     verify_result_signature,
     verify_session_signature,
 )
@@ -411,11 +413,21 @@ def offerwall_operations_action(request):
             messages.success(request, f"Payout moved to {status_map[action]}.")
         elif action == "retry-postback":
             delivery = get_object_or_404(
-                PostbackDelivery.objects.select_related("publisher"),
+                PostbackDelivery.objects.select_related("publisher", "placement"),
                 pk=request.POST.get("postback_id"),
             )
-            if not delivery.publisher.postback_enabled or not delivery.publisher.callback_url:
-                raise ValidationError("Publisher postbacks are not enabled.")
+            placement_ready = bool(
+                delivery.placement_id
+                and delivery.placement.postback_enabled
+                and delivery.placement.postback_url
+            )
+            publisher_ready = bool(
+                not delivery.placement_id
+                and delivery.publisher.postback_enabled
+                and delivery.publisher.callback_url
+            )
+            if not (placement_ready or publisher_ready):
+                raise ValidationError("Placement or publisher postbacks are not enabled.")
             from .tasks import deliver_postback_task
 
             delivery.status = PostbackDelivery.Status.PENDING
@@ -481,7 +493,7 @@ def wall_entry(request, publisher_slug):
 
 def _active_visit_or_error(request, visit_id, signature):
     visit = get_object_or_404(
-        WallVisit.objects.select_related("publisher"), public_id=visit_id
+        WallVisit.objects.select_related("publisher", "placement"), public_id=visit_id
     )
     if not visit.publisher.is_active:
         return None, _error(request, "Offerwall unavailable", "This publisher is inactive.", status=403)
@@ -517,7 +529,7 @@ def wall_session(request, visit_id):
 @require_GET
 def click_offer(request, visit_id, survey_id):
     visit = get_object_or_404(
-        WallVisit.objects.select_related("publisher"), public_id=visit_id
+        WallVisit.objects.select_related("publisher", "placement"), public_id=visit_id
     )
     if visit.expires_at <= timezone.now() or not visit.publisher.is_active:
         return _error(request, "Offer unavailable", "This offerwall session has expired.", status=403)
@@ -540,7 +552,9 @@ def click_offer(request, visit_id, survey_id):
 @require_GET
 def result(request, click_id):
     click = get_object_or_404(
-        OfferClick.objects.select_related("publisher", "survey", "attempt", "visit"),
+        OfferClick.objects.select_related(
+            "publisher", "survey", "attempt", "visit", "visit__placement"
+        ),
         public_id=click_id,
     )
     if not verify_result_signature(click.publisher, click.public_id, request.GET.get("sig", "")):
@@ -568,12 +582,21 @@ def result(request, click_id):
         state = "no-credit"
         title = click.attempt.get_status_display()
         message = "This attempt did not qualify for a reward. You can choose another offer."
+    display_credit_amount = credit.amount if credit else None
+    display_credit_currency = credit.currency if credit else ""
+    if credit and click.visit.placement_id:
+        display_credit_amount = (
+            credit.amount * click.visit.placement.currency_multiplier
+        ).quantize(Decimal("0.000001"))
+        display_credit_currency = click.visit.placement.currency
     response = render(
         request,
         "offerwall/result.html",
         {
             "click": click,
             "credit": credit,
+            "display_credit_amount": display_credit_amount,
+            "display_credit_currency": display_credit_currency,
             "state": state,
             "title": title,
             "message": message,
@@ -734,18 +757,63 @@ def _placement_embed_details(request, placement):
     base_url = request.build_absolute_uri(
         reverse("offerwall:placement-embed", kwargs={"placement_id": placement.public_id})
     )
-    embed_url = (
+    iframe_url = (
         f"{base_url}?{placement.respondent_id_parameter}={{{{USER_ID}}}}"
         f"&{placement.campaign_id_parameter}={{{{CAMPAIGN_ID}}}}"
         f"&{placement.affiliate_sub_parameter}={{{{SUB_ID}}}}"
     )
+    direct_url = f"{iframe_url}&access={sign_placement_access(placement)}"
     placement.embed_preview_url = base_url
+    placement.direct_url = direct_url
     placement.iframe_code = (
-        f'<iframe src="{embed_url}" title="RM Wins survey offerwall" '
+        f'<iframe src="{iframe_url}" title="RM Wins survey offerwall" '
         'width="100%" height="720" style="border:0;border-radius:16px" '
         'loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe>'
     )
     return placement
+
+
+def _remember_placement_secret(request, placement):
+    raw_secret = getattr(placement, "_generated_postback_secret", "")
+    if raw_secret:
+        request.session["offerwall_placement_secret_once"] = {
+            "placement_id": str(placement.public_id),
+            "secret": raw_secret,
+        }
+
+
+def _publisher_placements_response(request, publisher, *, form, editing=None):
+    placements = list(
+        publisher.placements.annotate(
+            visit_count=Count("visits", distinct=True),
+            click_count=Count("visits__clicks", distinct=True),
+            complete_count=Count(
+                "visits__clicks",
+                filter=Q(
+                    visits__clicks__status=SurveyAttempt.Status.COMPLETED,
+                    visits__clicks__is_verified=True,
+                ),
+                distinct=True,
+            ),
+        )
+    )
+    revealed = request.session.pop("offerwall_placement_secret_once", None)
+    for placement in placements:
+        _placement_embed_details(request, placement)
+        if revealed and revealed.get("placement_id") == str(placement.public_id):
+            placement.revealed_postback_secret = revealed.get("secret", "")
+    context = _supplier_portal_context(publisher, "placements")
+    context.update(
+        {
+            "form": form,
+            "editing_placement": editing,
+            "placements": placements,
+            "active_placements": sum(
+                item.status == PublisherPlacement.Status.ACTIVE for item in placements
+            ),
+        }
+    )
+    return _no_store(render(request, "offerwall/publisher_placements.html", context))
 
 
 @require_http_methods(["GET", "POST"])
@@ -762,6 +830,7 @@ def publisher_placements(request):
         placement = form.save(commit=False)
         placement.publisher = publisher
         placement.save()
+        _remember_placement_secret(request, placement)
         messages.success(
             request,
             f"Placement “{placement.name}” created. Your iframe is ready below.",
@@ -771,23 +840,79 @@ def publisher_placements(request):
                 f"{reverse('offerwall:publisher-placements')}#placement-{placement.public_id}"
             )
         )
-    placements = list(
-        publisher.placements.annotate(
-            visit_count=Count("visits", distinct=True),
-            click_count=Count("visits__clicks", distinct=True),
+    return _publisher_placements_response(request, publisher, form=form)
+
+
+@require_http_methods(["GET", "POST"])
+def publisher_placement_edit(request, placement_id):
+    publisher, denied = _publisher_portal_or_response(request)
+    if denied:
+        return denied
+    placement = get_object_or_404(
+        PublisherPlacement,
+        publisher=publisher,
+        public_id=placement_id,
+    )
+    form = PublisherPlacementForm(
+        request.POST or None,
+        instance=placement,
+        publisher=publisher,
+    )
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, f"Placement “{placement.name}” updated.")
+        return _no_store(
+            HttpResponseRedirect(
+                f"{reverse('offerwall:publisher-placements')}#placement-{placement.public_id}"
+            )
+        )
+    return _publisher_placements_response(
+        request,
+        publisher,
+        form=form,
+        editing=placement,
+    )
+
+
+@require_POST
+def publisher_placement_action(request, placement_id):
+    publisher, denied = _publisher_portal_or_response(request)
+    if denied:
+        return denied
+    placement = get_object_or_404(
+        PublisherPlacement,
+        publisher=publisher,
+        public_id=placement_id,
+    )
+    action = str(request.POST.get("action") or "").strip()
+    transitions = {
+        "activate": PublisherPlacement.Status.ACTIVE,
+        "pause": PublisherPlacement.Status.PAUSED,
+        "archive": PublisherPlacement.Status.ARCHIVED,
+    }
+    if action in transitions:
+        placement.status = transitions[action]
+        placement.save(update_fields=["status", "updated_at"])
+        messages.success(request, f"Placement “{placement.name}” is now {placement.get_status_display().lower()}.")
+    elif action == "rotate-postback-secret":
+        placement.set_postback_secret(generate_signing_secret())
+        placement.save(
+            update_fields=[
+                "encrypted_postback_secret",
+                "postback_secret_last_four",
+                "postback_secret_changed_at",
+                "updated_at",
+            ]
+        )
+        _remember_placement_secret(request, placement)
+        messages.success(request, "A new postback signing key was generated. Copy it now.")
+    else:
+        raise Http404
+    return _no_store(
+        HttpResponseRedirect(
+            f"{reverse('offerwall:publisher-placements')}#placement-{placement.public_id}"
         )
     )
-    for placement in placements:
-        _placement_embed_details(request, placement)
-    context = _supplier_portal_context(publisher, "placements")
-    context.update(
-        {
-            "form": form,
-            "placements": placements,
-            "active_placements": sum(item.is_active for item in placements),
-        }
-    )
-    return _no_store(render(request, "offerwall/publisher_placements.html", context))
 
 
 SUPPLIER_SECTION_COPY = {
@@ -835,16 +960,24 @@ def _placement_referrer_allowed(placement, request):
     referer = str(request.headers.get("Referer") or "").strip()
     if not referer:
         return False
-    allowed_host = str(urlparse(placement.website_url).hostname or "").lower()
     referer_host = str(urlparse(referer).hostname or "").lower()
-    allowed_host = allowed_host.removeprefix("www.")
     referer_host = referer_host.removeprefix("www.")
+    allowed_hosts = {
+        str(urlparse(placement.website_url).hostname or "").lower().removeprefix("www."),
+        *(
+            str(item or "").lower().removeprefix("www.")
+            for item in placement.allowed_domain_list
+        ),
+    }
     return bool(
-        allowed_host
-        and referer_host
-        and (
-            referer_host == allowed_host
-            or referer_host.endswith(f".{allowed_host}")
+        referer_host
+        and any(
+            allowed_host
+            and (
+                referer_host == allowed_host
+                or referer_host.endswith(f".{allowed_host}")
+            )
+            for allowed_host in allowed_hosts
         )
     )
 
@@ -861,7 +994,7 @@ def placement_embed(request, placement_id):
     placement = get_object_or_404(
         PublisherPlacement.objects.select_related("publisher"),
         public_id=placement_id,
-        is_active=True,
+        status=PublisherPlacement.Status.ACTIVE,
         publisher__is_active=True,
     )
     external_user_id = str(
@@ -881,7 +1014,10 @@ def placement_embed(request, placement_id):
         return _no_store(response)
     if not USER_ID_RE.fullmatch(external_user_id):
         return _error(request, "Invalid respondent ID", "Use a valid respondent identifier.")
-    if not _placement_referrer_allowed(placement, request):
+    if not (
+        _placement_referrer_allowed(placement, request)
+        or verify_placement_access(placement, request.GET.get("access", ""))
+    ):
         return _error(
             request,
             "Placement domain mismatch",
@@ -893,6 +1029,8 @@ def placement_embed(request, placement_id):
         external_user_id=external_user_id,
         request=request,
         placement=placement,
+        external_campaign_id=request.GET.get(placement.campaign_id_parameter, ""),
+        affiliate_sub_id=request.GET.get(placement.affiliate_sub_parameter, ""),
     )
     return _no_store(HttpResponseRedirect(session_url(visit)))
 

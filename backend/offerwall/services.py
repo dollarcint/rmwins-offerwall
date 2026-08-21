@@ -185,6 +185,13 @@ def offer_catalog(publisher: Publisher, visit: WallVisit) -> list[dict]:
     for survey in eligible_surveys(publisher, visit):
         override = overrides.get(survey.pk)
         payout = payout_for(survey, publisher, override)
+        display_reward = payout
+        display_currency = publisher.currency
+        if visit.placement_id and payout is not None:
+            display_reward = (
+                payout * visit.placement.currency_multiplier
+            ).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+            display_currency = visit.placement.currency
         click_path = reverse(
             "offerwall:click",
             kwargs={"visit_id": visit.public_id, "survey_id": survey.local_id},
@@ -195,8 +202,8 @@ def offer_catalog(publisher: Publisher, visit: WallVisit) -> list[dict]:
                 "id": survey.local_id,
                 "title": (override.title_override if override else "") or survey.name or f"Survey {survey.local_id}",
                 "client": survey.client.name if survey.client_id else survey.company_name,
-                "reward": payout,
-                "currency": publisher.currency,
+                "reward": display_reward,
+                "currency": display_currency,
                 "loi": survey.loi,
                 "incidence_rate": survey.incidence_rate,
                 "country": survey.country_code or survey.country,
@@ -225,6 +232,8 @@ def create_wall_visit(
     entry_timestamp,
     request=None,
     placement=None,
+    external_campaign_id="",
+    affiliate_sub_id="",
 ) -> WallVisit:
     location = resolve_entry_geolocation(request) if request is not None else {}
     client_data = get_request_client_data(request) if request is not None else {}
@@ -232,6 +241,8 @@ def create_wall_visit(
     defaults = {
         "external_user_id": external_user_id,
         "placement": placement,
+        "external_campaign_id": str(external_campaign_id or "").strip()[:160],
+        "affiliate_sub_id": str(affiliate_sub_id or "").strip()[:160],
         "entry_timestamp": entry_timestamp,
         "expires_at": now + timedelta(seconds=settings.OFFERWALL_VISIT_TTL_SECONDS),
         "country_code": str(location.get("country_code") or "")[:8],
@@ -261,6 +272,8 @@ def create_api_visit(
     external_user_id: str,
     request=None,
     placement=None,
+    external_campaign_id="",
+    affiliate_sub_id="",
 ) -> WallVisit:
     return create_wall_visit(
         publisher,
@@ -269,6 +282,8 @@ def create_api_visit(
         entry_timestamp=timezone.now(),
         request=request,
         placement=placement,
+        external_campaign_id=external_campaign_id,
+        affiliate_sub_id=affiliate_sub_id,
     )
 
 
@@ -343,6 +358,14 @@ def _postback_payload(click, attempt, event_type, ledger_entry, *, credited):
             if event_type == "reversal"
             else ledger_entry.amount if credited else amount
         )
+    placement = click.visit.placement if click.visit_id else None
+    reward_amount = amount
+    reward_currency = click.currency
+    if placement:
+        reward_amount = (
+            amount * placement.currency_multiplier
+        ).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+        reward_currency = placement.currency
     return {
         "event": event_type,
         "event_id": "",
@@ -358,6 +381,14 @@ def _postback_payload(click, attempt, event_type, ledger_entry, *, credited):
         "credited": bool(credited),
         "amount": str(amount),
         "currency": click.currency,
+        "payout_amount": str(amount),
+        "payout_currency": click.currency,
+        "reward_amount": str(reward_amount),
+        "reward_currency": reward_currency,
+        "placement_id": str(placement.public_id) if placement else "",
+        "placement_name": placement.name if placement else "",
+        "campaign_id": click.visit.external_campaign_id,
+        "affiliate_sub": click.visit.affiliate_sub_id,
         "verified": bool(attempt.is_verified),
         "occurred_at": timezone.now().isoformat(),
     }
@@ -374,9 +405,19 @@ def _enqueue_postback(delivery_id):
 
 def _create_postback(click, attempt, event_type, ledger_entry=None, *, credited=False):
     publisher = click.publisher
+    placement = click.visit.placement if click.visit_id else None
+    placement_callback = bool(
+        placement and placement.postback_enabled and placement.postback_url
+    )
+    callback_url = (
+        placement.postback_url
+        if placement_callback
+        else publisher.callback_url
+    )
     status = (
         PostbackDelivery.Status.PENDING
-        if publisher.postback_enabled and publisher.callback_url
+        if placement_callback
+        or (publisher.postback_enabled and publisher.callback_url)
         else PostbackDelivery.Status.SKIPPED
     )
     delivery, created = PostbackDelivery.objects.get_or_create(
@@ -384,8 +425,9 @@ def _create_postback(click, attempt, event_type, ledger_entry=None, *, credited=
         event_type=event_type,
         defaults={
             "publisher": publisher,
+            "placement": placement if placement_callback else None,
             "ledger_entry": ledger_entry,
-            "callback_url": publisher.callback_url,
+            "callback_url": callback_url,
             "status": status,
             "payload": {},
         },

@@ -13,6 +13,7 @@ from .models import (
     OfferOverride,
     PostbackDelivery,
     Publisher,
+    PublisherPlacement,
     PublisherPortalAccount,
     PublisherPayoutRequest,
     RewardLedgerEntry,
@@ -274,10 +275,50 @@ class OfferOverrideAdmin(admin.ModelAdmin):
 
 @admin.register(WallVisit)
 class WallVisitAdmin(admin.ModelAdmin):
-    list_display = ["public_id", "publisher", "external_user_id", "country_code", "device", "expires_at", "created_at"]
-    list_filter = ["publisher", "country_code", "device", "created_at"]
-    search_fields = ["external_user_id", "public_id", "entry_nonce"]
+    list_display = ["public_id", "publisher", "placement", "external_user_id", "country_code", "device", "expires_at", "created_at"]
+    list_filter = ["publisher", "placement", "country_code", "device", "created_at"]
+    search_fields = ["external_user_id", "external_campaign_id", "affiliate_sub_id", "public_id", "entry_nonce"]
     readonly_fields = [field.name for field in WallVisit._meta.fields]
+
+
+@admin.register(PublisherPlacement)
+class PublisherPlacementAdmin(admin.ModelAdmin):
+    list_display = [
+        "name",
+        "publisher",
+        "platform",
+        "status",
+        "postback_enabled",
+        "currency",
+        "updated_at",
+    ]
+    list_filter = ["publisher", "platform", "status", "postback_enabled", "currency"]
+    search_fields = ["name", "website_name", "website_url", "public_id"]
+    readonly_fields = [
+        "public_id",
+        "masked_postback_secret_display",
+        "postback_secret_changed_at",
+        "created_at",
+        "updated_at",
+    ]
+    fieldsets = [
+        ("Placement", {"fields": ["publisher", "public_id", "name", "platform", "status"]}),
+        ("Website", {"fields": ["website_name", "website_url", "allowed_domains"]}),
+        ("Reward", {"fields": ["currency", "currency_multiplier"]}),
+        (
+            "Variable mapping",
+            {"fields": ["respondent_id_parameter", "campaign_id_parameter", "affiliate_sub_parameter"]},
+        ),
+        (
+            "Postback",
+            {"fields": ["postback_enabled", "postback_url", "masked_postback_secret_display", "postback_secret_changed_at"]},
+        ),
+        ("Audit", {"fields": ["created_at", "updated_at"], "classes": ["collapse"]}),
+    ]
+
+    @admin.display(description="Postback signing key")
+    def masked_postback_secret_display(self, obj):
+        return obj.masked_postback_secret if obj and obj.pk else "Generated on first save"
 
 
 @admin.register(OfferClick)
@@ -422,8 +463,18 @@ def retry_postbacks(modeladmin, request, queryset):
     from .tasks import deliver_postback_task
 
     queued = 0
-    for delivery in queryset.exclude(status=PostbackDelivery.Status.DELIVERED):
-        if delivery.publisher.postback_enabled and delivery.publisher.callback_url:
+    for delivery in queryset.exclude(status=PostbackDelivery.Status.DELIVERED).select_related("placement", "publisher"):
+        placement_ready = bool(
+            delivery.placement_id
+            and delivery.placement.postback_enabled
+            and delivery.placement.postback_url
+        )
+        publisher_ready = bool(
+            not delivery.placement_id
+            and delivery.publisher.postback_enabled
+            and delivery.publisher.callback_url
+        )
+        if placement_ready or publisher_ready:
             delivery.status = PostbackDelivery.Status.PENDING
             delivery.next_attempt_at = None
             delivery.save(update_fields=["status", "next_attempt_at", "updated_at"])
@@ -434,8 +485,8 @@ def retry_postbacks(modeladmin, request, queryset):
 
 @admin.register(PostbackDelivery)
 class PostbackDeliveryAdmin(admin.ModelAdmin):
-    list_display = ["public_id", "publisher", "event_type", "status", "attempt_count", "response_code", "created_at"]
-    list_filter = ["publisher", "event_type", "status", "created_at"]
+    list_display = ["public_id", "publisher", "placement", "event_type", "status", "attempt_count", "response_code", "created_at"]
+    list_filter = ["publisher", "placement", "event_type", "status", "created_at"]
     search_fields = ["public_id", "click__public_id", "click__external_user_id"]
     readonly_fields = [field.name for field in PostbackDelivery._meta.fields]
     actions = [retry_postbacks]

@@ -196,6 +196,11 @@ class PublisherPlacement(models.Model):
         DESKTOP = "desktop", "Desktop"
         MOBILE = "mobile", "Mobile"
 
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        PAUSED = "paused", "Paused"
+        ARCHIVED = "archived", "Archived"
+
     PARAMETER_VALIDATOR = RegexValidator(
         r"^[A-Za-z][A-Za-z0-9_]{0,31}$",
         "Use 1–32 letters, numbers or underscores and start with a letter.",
@@ -215,11 +220,19 @@ class PublisherPlacement(models.Model):
     name = models.CharField(max_length=120)
     website_name = models.CharField(max_length=160)
     website_url = models.URLField(max_length=500)
+    allowed_domains = models.TextField(
+        blank=True,
+        help_text="Optional additional domains, one per line. The website domain is always allowed.",
+    )
     postback_url = models.URLField(
         max_length=2000,
         blank=True,
         help_text="Optional placement-specific HTTPS outcome endpoint.",
     )
+    postback_enabled = models.BooleanField(default=False)
+    encrypted_postback_secret = models.TextField(blank=True, editable=False)
+    postback_secret_last_four = models.CharField(max_length=4, blank=True, editable=False)
+    postback_secret_changed_at = models.DateTimeField(null=True, blank=True, editable=False)
     currency = models.CharField(max_length=3, default="USD")
     currency_multiplier = models.DecimalField(
         max_digits=12,
@@ -245,7 +258,12 @@ class PublisherPlacement(models.Model):
         default="subid",
         validators=[PARAMETER_VALIDATOR],
     )
-    is_active = models.BooleanField(default=True, db_index=True)
+    status = models.CharField(
+        max_length=12,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+        db_index=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -259,15 +277,42 @@ class PublisherPlacement(models.Model):
         ]
         indexes = [
             models.Index(
-                fields=["publisher", "is_active", "-created_at"],
+                fields=["publisher", "status", "-created_at"],
                 name="placement_active_idx",
             )
         ]
+
+    @property
+    def masked_postback_secret(self):
+        return (
+            f"••••{self.postback_secret_last_four}"
+            if self.postback_secret_last_four
+            else "Not generated"
+        )
+
+    @property
+    def is_active(self):
+        return self.status == self.Status.ACTIVE
+
+    @property
+    def allowed_domain_list(self):
+        return [item for item in str(self.allowed_domains or "").splitlines() if item]
+
+    def set_postback_secret(self, raw_secret: str):
+        raw_secret = str(raw_secret or "").strip()
+        if len(raw_secret) < 32:
+            raise ValueError("Placement postback secrets must contain at least 32 characters.")
+        self.encrypted_postback_secret = encrypt_signing_secret(raw_secret)
+        self.postback_secret_last_four = raw_secret[-4:]
+        self.postback_secret_changed_at = timezone.now()
+        self._generated_postback_secret = raw_secret
 
     def save(self, *args, **kwargs):
         self.name = str(self.name or "").strip()
         self.website_name = str(self.website_name or "").strip()
         self.currency = str(self.currency or "USD").strip().upper()
+        if not self.encrypted_postback_secret:
+            self.set_postback_secret(generate_signing_secret())
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -287,6 +332,8 @@ class WallVisit(models.Model):
         related_name="visits",
     )
     external_user_id = models.CharField(max_length=160, db_index=True)
+    external_campaign_id = models.CharField(max_length=160, blank=True)
+    affiliate_sub_id = models.CharField(max_length=160, blank=True)
     entry_nonce = models.CharField(max_length=80)
     country_code = models.CharField(max_length=8, blank=True, db_index=True)
     device = models.CharField(max_length=40, blank=True)
@@ -448,6 +495,13 @@ class PostbackDelivery(models.Model):
 
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     publisher = models.ForeignKey(Publisher, on_delete=models.PROTECT, related_name="postback_deliveries")
+    placement = models.ForeignKey(
+        PublisherPlacement,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="postback_deliveries",
+    )
     click = models.ForeignKey(OfferClick, on_delete=models.PROTECT, related_name="postback_deliveries")
     ledger_entry = models.ForeignKey(
         RewardLedgerEntry,

@@ -3,59 +3,112 @@
 {% block content %}
 <section class="ow-portal-page">
   <header class="ow-page-heading">
-    <div><span class="ow-eyebrow"><i></i> Distribution</span><h1>Placements</h1><p>Create a website placement, map your variables and copy its ready-to-use iframe.</p></div>
-    <div class="ow-page-metrics"><span><strong>{{ placements|length }}</strong>Total</span><span><strong>{{ active_placements }}</strong>Active</span></div>
+    <div><span class="ow-eyebrow"><i></i> Distribution</span><h1>Placements</h1><p>Create, secure and monitor every website or app surface serving your offerwall.</p></div>
+    <div class="ow-page-metrics"><span><strong>{{ placements|length }}</strong>Total</span><span><strong>{{ active_placements }}</strong>Live</span></div>
   </header>
 
-  <section class="ow-placement-builder">
-    <header><div><small>New placement</small><h2>Configure where your offerwall will run</h2></div><span>Secure iframe</span></header>
+  <section class="ow-placement-builder" id="placement-builder">
+    <header>
+      <div><small>{% if editing_placement %}Edit placement{% else %}New placement{% endif %}</small><h2>{% if editing_placement %}Update {{ editing_placement.name }}{% else %}Configure where your offerwall will run{% endif %}</h2></div>
+      <span>Secure integration</span>
+    </header>
     <form method="post" class="ow-placement-form" novalidate>
       {% csrf_token %}
       {% if form.non_field_errors %}<div class="ow-form-wide ow-field-errors">{{ form.non_field_errors }}</div>{% endif %}
       <div class="ow-placement-form-grid">
         <label><span>Platform *</span>{{ form.platform }}{{ form.platform.errors }}</label>
         <label><span>Placement name *</span>{{ form.name }}{{ form.name.errors }}</label>
-        <label><span>Website name *</span>{{ form.website_name }}{{ form.website_name.errors }}</label>
-        <label><span>Website URL *</span>{{ form.website_url }}{{ form.website_url.errors }}</label>
-        <label><span>Base postback URL</span>{{ form.postback_url }}{{ form.postback_url.errors }}</label>
-        <label><span>Currency *</span>{{ form.currency }}{{ form.currency.errors }}</label>
-        <label><span>Currency multiplier *</span>{{ form.currency_multiplier }}{{ form.currency_multiplier.errors }}</label>
+        <label><span>Website / app name *</span>{{ form.website_name }}{{ form.website_name.errors }}</label>
+        <label><span>Primary website URL *</span>{{ form.website_url }}{{ form.website_url.errors }}</label>
+        <label class="ow-form-span-2"><span>Additional allowed domains</span>{{ form.allowed_domains }}<small>Optional. Subdomains are accepted automatically.</small>{{ form.allowed_domains.errors }}</label>
+        <label><span>Reward currency *</span>{{ form.currency }}{{ form.currency.errors }}</label>
+        <label><span>Reward multiplier *</span>{{ form.currency_multiplier }}<small>Example: USD 1.00 × 100 = 100 points.</small>{{ form.currency_multiplier.errors }}</label>
       </div>
       <fieldset class="ow-variable-mapping">
-        <legend><span>Variable mapping</span><small>These names become the iframe query parameters supplied by your website.</small></legend>
+        <legend><span>Variable mapping</span><small>These values follow each respondent into reporting and callbacks.</small></legend>
         <div class="ow-placement-form-grid three">
           <label><span>Respondent ID *</span>{{ form.respondent_id_parameter }}{{ form.respondent_id_parameter.errors }}</label>
           <label><span>Campaign ID *</span>{{ form.campaign_id_parameter }}{{ form.campaign_id_parameter.errors }}</label>
           <label><span>Affiliate sub *</span>{{ form.affiliate_sub_parameter }}{{ form.affiliate_sub_parameter.errors }}</label>
         </div>
       </fieldset>
-      <div class="ow-placement-submit"><p>After saving, replace the iframe placeholders with your own user and campaign values.</p><button type="submit">Create placement <span>→</span></button></div>
+      <fieldset class="ow-variable-mapping">
+        <legend><span>Server postback</span><small>Signed JSON delivery with retries and unique event IDs.</small></legend>
+        <div class="ow-placement-form-grid">
+          <label class="ow-check-field">{{ form.postback_enabled }}<span>Enable placement callbacks</span>{{ form.postback_enabled.errors }}</label>
+          <label class="ow-form-span-2"><span>HTTPS postback URL</span>{{ form.postback_url }}{{ form.postback_url.errors }}</label>
+        </div>
+      </fieldset>
+      <div class="ow-placement-submit">
+        <p>Stable user IDs are required. Campaign and affiliate values are optional but will be returned in postbacks.</p>
+        <div class="ow-placement-submit-actions">
+          {% if editing_placement %}<a href="{% url 'offerwall:publisher-placements' %}#placement-{{ editing_placement.public_id }}">Cancel</a>{% endif %}
+          <button type="submit">{% if editing_placement %}Save changes{% else %}Create placement{% endif %} <span>→</span></button>
+        </div>
+      </div>
     </form>
   </section>
 
   <section class="ow-placement-list">
-    <header><div><small>Your inventory</small><h2>Placement iframe codes</h2></div></header>
+    <header><div><small>Your inventory</small><h2>Integration & performance</h2></div></header>
     {% for placement in placements %}
     <article class="ow-placement-card" id="placement-{{ placement.public_id }}">
       <header>
         <div><span class="ow-placement-platform">{{ placement.get_platform_display }}</span><h3>{{ placement.name }}</h3><p>{{ placement.website_name }} · {{ placement.website_url }}</p></div>
-        <span class="ow-placement-state {% if placement.is_active %}active{% endif %}">{% if placement.is_active %}Active{% else %}Inactive{% endif %}</span>
+        <div class="ow-placement-head-actions">
+          <span class="ow-placement-state {{ placement.status }}">{{ placement.get_status_display }}</span>
+          <a href="{% url 'offerwall:publisher-placement-edit' placement.public_id %}#placement-builder">Edit</a>
+        </div>
       </header>
-      <div class="ow-placement-card-stats"><span><strong>{{ placement.visit_count }}</strong>Sessions</span><span><strong>{{ placement.click_count }}</strong>Survey starts</span><span><strong>{{ placement.currency }}</strong>Currency</span><span><strong>{{ placement.currency_multiplier|floatformat:6 }}</strong>Multiplier</span></div>
+      <div class="ow-placement-card-stats">
+        <span><strong>{{ placement.visit_count }}</strong>Sessions</span>
+        <span><strong>{{ placement.click_count }}</strong>Survey starts</span>
+        <span><strong>{{ placement.complete_count }}</strong>Verified completes</span>
+        <span><strong>{{ placement.currency }}</strong>Reward currency</span>
+        <span><strong>×{{ placement.currency_multiplier|floatformat:6 }}</strong>Multiplier</span>
+      </div>
+      <div class="ow-placement-controls">
+        <form method="post" action="{% url 'offerwall:publisher-placement-action' placement.public_id %}">{% csrf_token %}
+          {% if placement.status == 'active' %}<button type="submit" name="action" value="pause">Pause placement</button>{% else %}<button class="primary" type="submit" name="action" value="activate">Activate placement</button>{% endif %}
+          {% if placement.status != 'archived' %}<button class="danger" type="submit" name="action" value="archive">Archive</button>{% endif %}
+        </form>
+        <span>Placement ID <code>{{ placement.public_id }}</code></span>
+      </div>
+      {% if placement.status == 'active' %}
       <div class="ow-iframe-grid">
         <div class="ow-code-panel">
-          <div><h4>Embed code</h4><button type="button" data-copy-target="iframe-{{ placement.public_id }}">Copy iframe</button></div>
+          <div><h4>Recommended iframe</h4><button type="button" data-copy-target="iframe-{{ placement.public_id }}">Copy iframe</button></div>
           <textarea id="iframe-{{ placement.public_id }}" readonly rows="8">{{ placement.iframe_code }}</textarea>
-          <p><strong>Required:</strong> replace <code>{% templatetag openvariable %}USER_ID{% templatetag closevariable %}</code>. Campaign and sub placeholders can use your own values.</p>
+          <p><strong>Required:</strong> replace <code>{% templatetag openvariable %}USER_ID{% templatetag closevariable %}</code> with one stable ID per respondent.</p>
+        </div>
+        <div class="ow-code-panel">
+          <div><h4>Direct-link integration</h4><button type="button" data-copy-target="direct-{{ placement.public_id }}">Copy link</button></div>
+          <textarea id="direct-{{ placement.public_id }}" readonly rows="8">{{ placement.direct_url }}</textarea>
+          <p>Use for a button or new tab. The signed access token lets the link work without relying on a browser referrer.</p>
+        </div>
+      </div>
+      <div class="ow-iframe-grid ow-placement-lower-grid">
+        <div class="ow-postback-panel">
+          <div><h4>Signed server postback</h4><span>{% if placement.postback_enabled %}Enabled{% else %}Disabled{% endif %}</span></div>
+          {% if placement.revealed_postback_secret %}
+          <div class="ow-secret-reveal"><strong>Copy this key now — it is shown once.</strong><textarea id="secret-{{ placement.public_id }}" readonly rows="2">{{ placement.revealed_postback_secret }}</textarea><button type="button" data-copy-target="secret-{{ placement.public_id }}">Copy signing key</button></div>
+          {% else %}
+          <p>Signing key: <code>{{ placement.masked_postback_secret }}</code>. Verify <code>X-Offerwall-Signature</code> against the raw JSON body and deduplicate using <code>event_id</code>.</p>
+          {% endif %}
+          <p>Payload includes user, placement, campaign, affiliate sub, transaction, outcome, payout and multiplied reward fields.</p>
+          <form method="post" action="{% url 'offerwall:publisher-placement-action' placement.public_id %}">{% csrf_token %}<button type="submit" name="action" value="rotate-postback-secret">Rotate signing key</button></form>
         </div>
         <div class="ow-iframe-preview">
           <div><h4>Live preview</h4><span>{{ placement.public_id }}</span></div>
           <iframe src="{{ placement.embed_preview_url }}" title="{{ placement.name }} preview" loading="lazy"></iframe>
         </div>
       </div>
+      {% else %}
+      <div class="ow-placement-offline"><strong>{{ placement.get_status_display }} placement</strong><p>Entry links are disabled. Historical sessions and results stay available.</p></div>
+      {% endif %}
     </article>
     {% empty %}
-    <div class="ow-placement-empty"><span aria-hidden="true">▣</span><h3>No placements yet</h3><p>Create your first placement above and its iframe will appear here.</p></div>
+    <div class="ow-placement-empty"><span aria-hidden="true">▣</span><h3>No placements yet</h3><p>Create your first placement above and its iframe, direct link and signing key will appear here.</p></div>
     {% endfor %}
   </section>
 </section>
@@ -64,6 +117,7 @@ document.addEventListener('click', (event) => {
   const button = event.target.closest('[data-copy-target]');
   if (!button) return;
   const field = document.getElementById(button.dataset.copyTarget);
+  if (!field || !navigator.clipboard) return;
   navigator.clipboard.writeText(field.value).then(() => {
     const original = button.textContent;
     button.textContent = 'Copied';

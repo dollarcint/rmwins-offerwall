@@ -41,6 +41,10 @@ def decrypt_signing_secret(publisher) -> str:
     return decrypt_secret(publisher.encrypted_signing_secret)
 
 
+def decrypt_placement_postback_secret(placement) -> str:
+    return decrypt_secret(placement.encrypted_postback_secret)
+
+
 def _hex_hmac(secret: str, payload: str) -> str:
     return hmac.new(
         secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
@@ -89,6 +93,21 @@ def verify_session_signature(publisher, visit_public_id, signature: str) -> bool
     return bool(
         SIGNATURE_RE.fullmatch(supplied)
         and hmac.compare_digest(sign_session(publisher, visit_public_id), supplied)
+    )
+
+
+def sign_placement_access(placement) -> str:
+    return _hex_hmac(
+        decrypt_signing_secret(placement.publisher),
+        f"offerwall-placement-v1\n{placement.public_id}",
+    )
+
+
+def verify_placement_access(placement, signature: str) -> bool:
+    supplied = str(signature or "").strip().lower()
+    return bool(
+        SIGNATURE_RE.fullmatch(supplied)
+        and hmac.compare_digest(sign_placement_access(placement), supplied)
     )
 
 

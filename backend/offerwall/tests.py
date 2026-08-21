@@ -25,10 +25,13 @@ from .models import (
     WallVisit,
 )
 from .security import (
+    decrypt_placement_postback_secret,
     decrypt_signing_secret,
+    postback_signature,
     sign_click,
     sign_entry,
     sign_portal_access,
+    sign_placement_access,
     sign_result,
     sign_session,
 )
@@ -525,6 +528,8 @@ class OfferwallFlowTests(TestCase):
                 "name": "Main rewards wall",
                 "website_name": "Rewards Club",
                 "website_url": "https://rewards.example.test",
+                "allowed_domains": "app.rewards.example.test",
+                "postback_enabled": "on",
                 "postback_url": "https://rewards.example.test/postback",
                 "currency": "usd",
                 "currency_multiplier": "1.25",
@@ -540,12 +545,16 @@ class OfferwallFlowTests(TestCase):
             fetch_redirect_response=False,
         )
         self.assertEqual(placement.currency, "USD")
+        self.assertTrue(placement.postback_enabled)
+        self.assertEqual(placement.allowed_domain_list, ["app.rewards.example.test"])
         page = self.client.get(reverse("offerwall:publisher-placements"))
         self.assertContains(page, "Main rewards wall")
         self.assertContains(page, "USER_ID")
         self.assertContains(page, str(placement.public_id))
         self.assertContains(page, "Respondents")
         self.assertContains(page, "Open-ended answers")
+        self.assertContains(page, "Copy signing key")
+        self.assertContains(page, "Direct-link integration")
 
     def test_placement_embed_creates_placement_attributed_visit(self):
         placement = PublisherPlacement.objects.create(
@@ -553,6 +562,8 @@ class OfferwallFlowTests(TestCase):
             name="Embedded wall",
             website_name="Publisher Site",
             website_url="https://publisher.example.test",
+            currency="PTS",
+            currency_multiplier=Decimal("100.000000"),
         )
         path = reverse(
             "offerwall:placement-embed",
@@ -571,6 +582,11 @@ class OfferwallFlowTests(TestCase):
         self.assertIn("/wall/session/", response["Location"])
         visit = WallVisit.objects.get(external_user_id="member-100")
         self.assertEqual(visit.placement, placement)
+        self.assertEqual(visit.external_campaign_id, "summer")
+        self.assertEqual(visit.affiliate_sub_id, "home")
+        offer = offer_catalog(self.publisher, visit)[0]
+        self.assertEqual(offer["reward"], Decimal("350.000000"))
+        self.assertEqual(offer["currency"], "PTS")
         session_location = urlsplit(response["Location"])
         session_page = self.client.get(
             f"{session_location.path}?{session_location.query}"
@@ -597,6 +613,112 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(blocked.status_code, 403)
         self.assertFalse(WallVisit.objects.filter(external_user_id="member-101").exists())
         self.assertEqual(self.client.get(f"{path}?uid=member-102").status_code, 403)
+
+        direct = self.client.get(
+            path,
+            {
+                "uid": "member-direct",
+                "campaign_id": "winter",
+                "subid": "cta",
+                "access": sign_placement_access(placement),
+            },
+        )
+        self.assertEqual(direct.status_code, 302)
+        direct_visit = WallVisit.objects.get(external_user_id="member-direct")
+        self.assertEqual(direct_visit.external_campaign_id, "winter")
+        self.assertEqual(direct_visit.affiliate_sub_id, "cta")
+
+    def test_supplier_can_edit_pause_activate_and_archive_own_placement(self):
+        self._open_supplier_session(suffix="lifecycle")
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Lifecycle wall",
+            website_name="Publisher Site",
+            website_url="https://publisher.example.test",
+        )
+        edit_url = reverse(
+            "offerwall:publisher-placement-edit",
+            kwargs={"placement_id": placement.public_id},
+        )
+        response = self.client.post(
+            edit_url,
+            {
+                "platform": PublisherPlacement.Platform.MOBILE,
+                "name": "Mobile rewards wall",
+                "website_name": "Publisher App",
+                "website_url": "https://app.publisher.example.test",
+                "allowed_domains": "rewards.publisher.example.test",
+                "postback_url": "",
+                "currency": "pts",
+                "currency_multiplier": "10",
+                "respondent_id_parameter": "player_id",
+                "campaign_id_parameter": "campaign",
+                "affiliate_sub_parameter": "source",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        placement.refresh_from_db()
+        self.assertEqual(placement.name, "Mobile rewards wall")
+        self.assertEqual(placement.currency, "PTS")
+
+        action_url = reverse(
+            "offerwall:publisher-placement-action",
+            kwargs={"placement_id": placement.public_id},
+        )
+        self.client.post(action_url, {"action": "pause"})
+        placement.refresh_from_db()
+        self.assertEqual(placement.status, PublisherPlacement.Status.PAUSED)
+        embed_url = reverse(
+            "offerwall:placement-embed",
+            kwargs={"placement_id": placement.public_id},
+        )
+        self.assertEqual(self.client.get(embed_url).status_code, 404)
+        self.client.post(action_url, {"action": "activate"})
+        placement.refresh_from_db()
+        self.assertEqual(placement.status, PublisherPlacement.Status.ACTIVE)
+        self.client.post(action_url, {"action": "archive"})
+        placement.refresh_from_db()
+        self.assertEqual(placement.status, PublisherPlacement.Status.ARCHIVED)
+
+    def test_placement_postback_uses_placement_url_key_and_tracking_values(self):
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Callback wall",
+            website_name="Publisher Site",
+            website_url="https://publisher.example.test",
+            postback_enabled=True,
+            postback_url="https://publisher.example.test/placement-callback",
+            currency="PTS",
+            currency_multiplier=Decimal("100.000000"),
+        )
+        self.assertGreaterEqual(len(decrypt_placement_postback_secret(placement)), 32)
+        visit = create_wall_visit(
+            self.publisher,
+            external_user_id="member-callback",
+            nonce="placement_callback_nonce",
+            entry_timestamp=timezone.now(),
+            placement=placement,
+            external_campaign_id="campaign-88",
+            affiliate_sub_id="homepage",
+        )
+        click = self._click(visit=visit)
+        click.attempt.status = SurveyAttempt.Status.COMPLETED
+        click.attempt.status_source = "innovatemr_s2s"
+        click.attempt.is_verified = True
+        click.attempt.save(
+            update_fields=["status", "status_source", "is_verified", "updated_at"]
+        )
+        process_attempt_outcome(click.attempt_id)
+        delivery = PostbackDelivery.objects.get(event_type="complete")
+        self.assertEqual(delivery.placement, placement)
+        self.assertEqual(delivery.callback_url, placement.postback_url)
+        self.assertEqual(delivery.status, PostbackDelivery.Status.PENDING)
+        self.assertEqual(delivery.payload["placement_id"], str(placement.public_id))
+        self.assertEqual(delivery.payload["campaign_id"], "campaign-88")
+        self.assertEqual(delivery.payload["affiliate_sub"], "homepage")
+        self.assertEqual(delivery.payload["payout_amount"], "3.50")
+        self.assertEqual(delivery.payload["reward_amount"], "350.000000")
+        self.assertEqual(delivery.payload["reward_currency"], "PTS")
 
     def test_supplier_placement_list_is_publisher_scoped(self):
         self._open_supplier_session(suffix="scope")
@@ -836,3 +958,33 @@ class OfferwallPostbackSecurityTests(TestCase):
         self.delivery.refresh_from_db()
         self.assertEqual(self.delivery.status, PostbackDelivery.Status.DELIVERED)
         self.assertEqual(self.delivery.attempt_count, 1)
+
+    @patch("offerwall.tasks.requests.post")
+    @patch("offerwall.tasks.socket.getaddrinfo")
+    def test_placement_delivery_uses_dedicated_signing_key(self, getaddrinfo, post):
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Secure placement",
+            website_name="Rewards",
+            website_url="https://publisher.example.test",
+            postback_enabled=True,
+            postback_url="https://publisher.example.test/placement-postback",
+        )
+        self.delivery.placement = placement
+        self.delivery.callback_url = placement.postback_url
+        self.delivery.save(update_fields=["placement", "callback_url", "updated_at"])
+        getaddrinfo.return_value = [(2, 1, 6, "", ("93.184.216.34", 443))]
+        post.return_value.status_code = 200
+
+        result = deliver_postback_task(self.delivery.pk)
+
+        self.assertEqual(result["status"], "delivered")
+        kwargs = post.call_args.kwargs
+        timestamp = int(kwargs["headers"]["X-Offerwall-Timestamp"])
+        expected = postback_signature(
+            decrypt_placement_postback_secret(placement),
+            timestamp=timestamp,
+            event_id=str(self.delivery.public_id),
+            body=kwargs["data"],
+        )
+        self.assertEqual(kwargs["headers"]["X-Offerwall-Signature"], f"sha256={expected}")

@@ -30,6 +30,16 @@ urlpatterns = [
         name="publisher-placements",
     ),
     path(
+        "publisher/placements/<uuid:placement_id>/edit/",
+        views.publisher_placement_edit,
+        name="publisher-placement-edit",
+    ),
+    path(
+        "publisher/placements/<uuid:placement_id>/action/",
+        views.publisher_placement_action,
+        name="publisher-placement-action",
+    ),
+    path(
         "publisher/sections/<slug:section>/",
         views.publisher_section,
         name="publisher-section",

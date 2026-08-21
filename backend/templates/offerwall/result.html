@@ -9,7 +9,7 @@
     <dl>
       <div><dt>Offer</dt><dd>{{ click.survey.name|default:click.survey.local_id }}</dd></div>
       <div><dt>Status</dt><dd>{{ click.attempt.get_status_display }}</dd></div>
-      {% if credit %}<div><dt>Credited reward</dt><dd>{{ credit.currency }} {{ credit.amount|floatformat:2 }}</dd></div>{% endif %}
+      {% if credit %}<div><dt>Credited reward</dt><dd>{{ display_credit_currency }} {{ display_credit_amount|floatformat:6 }}</dd></div>{% endif %}
       <div><dt>Click ID</dt><dd class="mono">{{ click.public_id }}</dd></div>
     </dl>
     {% if wall_url %}<a class="ow-button primary wide" href="{{ wall_url }}">View more surveys</a>{% endif %}

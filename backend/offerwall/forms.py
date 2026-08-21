@@ -1,4 +1,5 @@
 import re
+from urllib.parse import urlsplit
 
 from django import forms
 from django.contrib.auth import get_user_model
@@ -145,6 +146,8 @@ class PublisherPlacementForm(forms.ModelForm):
             "name",
             "website_name",
             "website_url",
+            "allowed_domains",
+            "postback_enabled",
             "postback_url",
             "currency",
             "currency_multiplier",
@@ -154,6 +157,7 @@ class PublisherPlacementForm(forms.ModelForm):
         ]
         labels = {
             "postback_url": "Base postback URL",
+            "allowed_domains": "Additional allowed domains",
             "respondent_id_parameter": "Respondent ID variable",
             "campaign_id_parameter": "Campaign ID variable",
             "affiliate_sub_parameter": "Affiliate sub variable",
@@ -164,6 +168,12 @@ class PublisherPlacementForm(forms.ModelForm):
             "website_url": forms.URLInput(attrs={"placeholder": "https://example.com"}),
             "postback_url": forms.URLInput(
                 attrs={"placeholder": "https://example.com/postback (optional)"}
+            ),
+            "allowed_domains": forms.Textarea(
+                attrs={
+                    "placeholder": "rewards.example.com\napp.example.com",
+                    "rows": 3,
+                }
             ),
             "currency": forms.TextInput(attrs={"placeholder": "USD", "maxlength": 3}),
             "currency_multiplier": forms.NumberInput(
@@ -190,6 +200,38 @@ class PublisherPlacementForm(forms.ModelForm):
     def clean_postback_url(self):
         return self._secure_url("postback_url", required=False)
 
+    def clean_allowed_domains(self):
+        raw_value = str(self.cleaned_data.get("allowed_domains") or "")
+        domains = []
+        for raw_domain in re.split(r"[,\s]+", raw_value):
+            value = raw_domain.strip().lower()
+            if not value:
+                continue
+            value = value.removeprefix("*.")
+            parsed = urlsplit(value if "://" in value else f"//{value}")
+            try:
+                hostname = parsed.hostname
+                port = parsed.port
+            except ValueError as exc:
+                raise ValidationError(
+                    "Enter domains only, such as rewards.example.com."
+                ) from exc
+            if (
+                parsed.scheme not in {"", "http", "https"}
+                or not hostname
+                or parsed.username
+                or parsed.password
+                or port
+                or (parsed.path and parsed.path != "/")
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValidationError("Enter domains only, such as rewards.example.com.")
+            domain = hostname.lower().rstrip(".")
+            if domain not in domains:
+                domains.append(domain)
+        return "\n".join(domains)
+
     def _secure_url(self, field_name, *, required):
         value = str(self.cleaned_data.get(field_name) or "").strip()
         if not value and not required:
@@ -208,6 +250,8 @@ class PublisherPlacementForm(forms.ModelForm):
         values = [str(cleaned.get(field) or "").casefold() for field in parameter_fields]
         if all(values) and len(set(values)) != len(values):
             raise ValidationError("Each variable mapping must use a different parameter name.")
+        if cleaned.get("postback_enabled") and not cleaned.get("postback_url"):
+            self.add_error("postback_url", "Enter a postback URL before enabling callbacks.")
         if self.publisher and cleaned.get("name"):
             duplicate = PublisherPlacement.objects.filter(
                 publisher=self.publisher,

@@ -13,7 +13,11 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import PostbackDelivery
-from .security import decrypt_signing_secret, postback_signature
+from .security import (
+    decrypt_placement_postback_secret,
+    decrypt_signing_secret,
+    postback_signature,
+)
 
 
 def _validated_callback_url(url: str) -> str:
@@ -50,7 +54,7 @@ def deliver_postback_task(self, delivery_id):
     with transaction.atomic():
         delivery = (
             PostbackDelivery.objects.select_for_update()
-            .select_related("publisher")
+            .select_related("publisher", "placement")
             .get(pk=delivery_id)
         )
         if delivery.status in {
@@ -58,9 +62,19 @@ def deliver_postback_task(self, delivery_id):
             PostbackDelivery.Status.SKIPPED,
         }:
             return {"status": delivery.status, "attempts": delivery.attempt_count}
-        if not delivery.publisher.is_active or not delivery.publisher.postback_enabled:
+        placement_enabled = bool(
+            delivery.placement_id
+            and delivery.placement.postback_enabled
+            and delivery.placement.postback_url
+        )
+        publisher_enabled = bool(
+            not delivery.placement_id
+            and delivery.publisher.postback_enabled
+            and delivery.publisher.callback_url
+        )
+        if not delivery.publisher.is_active or not (placement_enabled or publisher_enabled):
             delivery.status = PostbackDelivery.Status.SKIPPED
-            delivery.last_error = "Publisher postbacks are disabled."
+            delivery.last_error = "Placement or publisher postbacks are disabled."
             delivery.save(update_fields=["status", "last_error", "updated_at"])
             return {"status": delivery.status, "attempts": delivery.attempt_count}
         delivery.attempt_count += 1
@@ -70,13 +84,18 @@ def deliver_postback_task(self, delivery_id):
         callback_url = delivery.callback_url
         payload = delivery.payload
         publisher = delivery.publisher
+        placement = delivery.placement
 
     try:
         callback_url = _validated_callback_url(callback_url)
         body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         timestamp = int(timezone.now().timestamp())
         signature = postback_signature(
-            decrypt_signing_secret(publisher),
+            (
+                decrypt_placement_postback_secret(placement)
+                if placement
+                else decrypt_signing_secret(publisher)
+            ),
             timestamp=timestamp,
             event_id=str(delivery.public_id),
             body=body,
