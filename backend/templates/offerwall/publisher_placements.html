@@ -4,7 +4,7 @@
 <section class="ow-apps-page ow-ou-placements-page">
   <header class="ow-apps-heading">
     <div><h1>Apps / Placements</h1><p>Manage your application placements and track revenue</p></div>
-    <button class="ow-add-placement" type="button" data-open-placement>Add Placement</button>
+    <button class="ow-add-placement" type="button" data-open-placement><span>＋</span>Add Placement</button>
   </header>
 
   <section class="ow-apps-table-card">
@@ -17,7 +17,7 @@
               {% if placement.favicon_url %}<img class="ow-app-favicon-image" src="{{ placement.favicon_url }}" alt="favicon" loading="lazy">{% else %}<span class="ow-app-favicon">{{ placement.website_name|slice:':1'|upper }}</span>{% endif %}
               <div><strong>{{ placement.website_name }}</strong><small>ID: {{ placement.app_id }}</small></div>
             </div></td>
-            <td>{{ placement.get_platform_display }}</td>
+            <td><span class="ow-platform-pill {{ placement.platform }}">◎ {{ placement.get_platform_display }}</span></td>
             <td><span class="ow-placement-state {{ placement.status }}">{{ placement.get_status_display }}</span></td>
             <td><time datetime="{{ placement.created_at|date:'c' }}">{{ placement.created_at|date:'F j, Y' }}</time></td>
             <td><strong class="ow-placement-revenue">${{ placement.total_revenue|floatformat:2 }}</strong></td>
@@ -45,9 +45,9 @@
     {% csrf_token %}
     <header><h2>Add New Placement</h2><button type="button" class="ow-modal-close" data-close-placement aria-label="Close modal">×</button></header>
     {% if form.non_field_errors %}<div class="ow-field-errors">{{ form.non_field_errors }}</div>{% endif %}
-    <fieldset><legend>Select Platform</legend><div class="ow-platform-options">{{ form.platform }}</div>{{ form.platform.errors }}</fieldset>
-    <label class="ow-placement-url-field"><span>Website URL <b>*</b></span>{{ form.website_url }}{{ form.website_url.errors }}</label>
-    <footer><button type="button" class="ow-modal-cancel" data-close-placement>Cancel</button><button type="submit" class="ow-modal-submit">Add</button></footer>
+    <fieldset><legend>Select Platform</legend><div class="ow-platform-options"><label><input type="radio" name="platform" value="web" {% if form.platform.value == 'web' or not form.platform.value %}checked{% endif %}><span>◎</span><b>Web</b></label><label><input type="radio" name="platform" value="android" {% if form.platform.value == 'android' %}checked{% endif %}><span>◒</span><b>Android</b></label><label><input type="radio" name="platform" value="ios" {% if form.platform.value == 'ios' %}checked{% endif %}><span>●</span><b>iOS</b></label></div>{{ form.platform.errors }}</fieldset>
+    <label class="ow-placement-url-field"><span>Website URL <b>*</b></span><i>{{ form.website_url }}<em aria-hidden="true">⌕</em></i>{{ form.website_url.errors }}</label>
+    <footer><button type="button" class="ow-modal-cancel" data-close-placement>Cancel</button><button type="submit" class="ow-modal-submit" disabled>Add</button></footer>
   </form>
 </dialog>
 <script>
@@ -57,6 +57,9 @@
   const close=()=>modal.close ? modal.close() : modal.removeAttribute('open');
   document.querySelectorAll('[data-open-placement]').forEach(button=>button.addEventListener('click',open));
   document.querySelectorAll('[data-close-placement]').forEach(button=>button.addEventListener('click',close));
+  const urlInput=modal.querySelector('[name="website_url"]'),submit=modal.querySelector('.ow-modal-submit');
+  const refreshSubmit=()=>{let valid=false;try{const value=new URL(urlInput.value);valid=value.protocol==='https:'&&Boolean(value.hostname)}catch(error){}submit.disabled=!valid};
+  urlInput?.addEventListener('input',refreshSubmit);refreshSubmit();
   modal.addEventListener('click',event=>{if(event.target===modal) close();});
   document.addEventListener('click',event=>document.querySelectorAll('.ow-placement-actions[open]').forEach(menu=>{if(!menu.contains(event.target)) menu.removeAttribute('open');}));
   if(new URLSearchParams(location.search).has('new')) open();

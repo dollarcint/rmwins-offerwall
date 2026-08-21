@@ -4955,3 +4955,566 @@ a {
     grid-template-columns: 1fr;
   }
 }
+
+/* Final visual alignment against the live OpinionUniverse placement screens. */
+.ow-supplier-app {
+  grid-template-columns: 296px minmax(0, 1fr);
+}
+.ow-supplier-sidebar {
+  width: 296px;
+  padding: 0 16px 18px;
+}
+.ow-supplier-brand {
+  min-height: 112px;
+  padding: 0;
+}
+.ow-supplier-brand > span:last-child {
+  display: none;
+}
+.ow-supplier-brand .ow-brand-mark {
+  width: 46px;
+  height: 46px;
+}
+.ow-supplier-nav {
+  padding: 8px 0;
+}
+.ow-supplier-nav a,
+.ow-ou-nav-group > summary {
+  min-height: 49px;
+  padding: 0 14px;
+  gap: 12px;
+  color: #555c69;
+  font-size: 15px;
+  font-weight: 650;
+}
+.ow-supplier-nav a.active {
+  box-shadow: none;
+}
+.ow-supplier-nav a > span,
+.ow-ou-nav-group > summary > span {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  color: #747b89;
+  background: transparent;
+}
+.ow-supplier-nav a.active > span {
+  border: 0;
+  color: var(--ou-orange);
+  background: transparent;
+}
+.ow-ou-nav-group {
+  margin: 2px 0;
+}
+.ow-ou-nav-group > summary {
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+  list-style: none;
+  cursor: pointer;
+}
+.ow-ou-nav-group > summary::-webkit-details-marker {
+  display: none;
+}
+.ow-ou-nav-group > summary b {
+  margin-left: auto;
+  font-size: 12px;
+}
+.ow-ou-nav-group[open] > summary b {
+  transform: rotate(180deg);
+}
+.ow-ou-nav-group > div {
+  display: grid;
+  padding: 2px 0 6px 49px;
+}
+.ow-ou-nav-group > div a {
+  min-height: 30px;
+  padding: 0;
+  color: #747b87;
+  font-size: 12px;
+}
+.ow-supplier-stage {
+  margin-left: 0;
+}
+.ow-supplier-toolbar {
+  min-height: 96px;
+  padding: 0 36px;
+}
+.ow-supplier-toolbar > div:first-child small {
+  font-size: 26px;
+  font-weight: 500;
+}
+.ow-ou-notification {
+  margin-left: auto;
+  color: #8b919c;
+  font-size: 21px;
+}
+.ow-ou-account summary b {
+  color: #9ba0a9;
+  font-size: 11px;
+}
+.ow-ou-account-menu {
+  position: absolute;
+  z-index: 20;
+  top: 52px;
+  right: 0;
+  min-width: 145px;
+  display: none;
+  border: 1px solid var(--ou-border);
+  border-radius: 9px;
+  padding: 7px;
+  background: #fff;
+  box-shadow: 0 10px 25px rgba(20, 25, 35, .1);
+}
+.ow-ou-account[open] .ow-ou-account-menu {
+  display: grid;
+}
+.ow-ou-account-menu a,
+.ow-ou-account-menu form button {
+  width: 100%;
+  display: block;
+  border: 0;
+  border-radius: 6px;
+  padding: 9px;
+  color: #555c68;
+  background: #fff;
+  text-align: left;
+  text-decoration: none;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ow-ou-account-menu form {
+  position: static;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+}
+.ow-supplier-main {
+  width: 100%;
+  max-width: none;
+  padding: 38px 32px 70px;
+}
+.ow-apps-page {
+  width: 100%;
+  max-width: none;
+}
+.ow-ou-placements-page .ow-apps-heading {
+  min-height: 106px;
+  align-items: center;
+  margin-bottom: 22px;
+  border: 1px solid var(--ou-border);
+  border-radius: 12px;
+  padding: 24px 25px;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(30, 34, 42, .025);
+}
+.ow-ou-placements-page .ow-apps-heading h1 {
+  margin: 0 0 5px;
+  font-size: 28px;
+}
+.ow-ou-placements-page .ow-apps-heading p {
+  font-size: 14px;
+}
+.ow-ou-placements-page .ow-add-placement {
+  min-width: 190px;
+  min-height: 46px;
+  border-radius: 9px;
+  font-size: 14px;
+}
+.ow-ou-placements-page .ow-apps-table-card {
+  border-radius: 12px;
+}
+.ow-ou-placements-page .ow-apps-table th {
+  padding: 18px 24px;
+  font-size: 13px;
+}
+.ow-ou-placements-page .ow-apps-table td {
+  min-height: 72px;
+  padding: 18px 24px;
+  font-size: 14px;
+}
+.ow-app-favicon-image {
+  width: 38px;
+  height: 38px;
+}
+.ow-ou-placements-page .ow-app-cell strong {
+  font-size: 15px;
+}
+.ow-ou-placements-page .ow-app-cell small {
+  font-size: 11px;
+}
+.ow-ou-placements-page .ow-platform-pill {
+  padding: 6px 10px;
+  color: #2866c7;
+  background: #eef4ff;
+  font-size: 13px;
+}
+.ow-ou-placements-page .ow-placement-state {
+  padding: 6px 10px;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.ow-ou-placements-page .ow-placement-revenue {
+  display: inline-block;
+  border: 1px solid #ccebd9;
+  border-radius: 7px;
+  padding: 7px 11px;
+  color: #177b4d;
+  background: #effbf4;
+}
+.ow-ou-placements-page .ow-placement-actions summary {
+  border-color: transparent;
+  background: transparent;
+  font-size: 0;
+}
+.ow-ou-placements-page .ow-placement-actions summary::after {
+  content: '⋮';
+  color: #777e89;
+  font-size: 22px;
+}
+.ow-ou-placements-page .ow-apps-footer {
+  min-height: 80px;
+  padding: 18px 24px;
+  font-size: 14px;
+}
+.ow-ou-placements-page .ow-apps-footer nav a,
+.ow-ou-placements-page .ow-apps-footer nav span,
+.ow-ou-placements-page .ow-apps-footer nav b {
+  padding: 9px 13px;
+  font-size: 12px;
+}
+.ow-placement-modal {
+  width: min(674px, calc(100% - 30px));
+  min-height: 620px;
+  border-radius: 16px;
+  overflow: hidden;
+}
+.ow-placement-create-form {
+  min-height: 620px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ow-placement-create-form > header {
+  padding: 20px 25px 17px;
+}
+.ow-placement-create-form header h2 {
+  margin: 0;
+  font-size: 26px;
+}
+.ow-modal-close {
+  color: #8f96a1;
+  background: transparent;
+  font-size: 25px;
+}
+.ow-placement-create-form fieldset,
+.ow-placement-url-field {
+  padding: 28px 25px 0;
+}
+.ow-placement-create-form legend,
+.ow-placement-url-field > span {
+  color: #272c35;
+  font-size: 14px;
+}
+.ow-platform-options {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.ow-platform-options > div {
+  width: 100%;
+}
+.ow-platform-options label {
+  min-width: 0;
+  min-height: 94px;
+  align-content: center;
+  gap: 5px;
+  border-radius: 11px;
+  font-size: 15px;
+}
+.ow-platform-options label > span {
+  color: #949aa5;
+  font-size: 31px;
+  line-height: 1;
+}
+.ow-platform-options label:has(input:checked) > span,
+.ow-platform-options label:has(input:checked) > b {
+  color: var(--ou-orange);
+}
+.ow-placement-url-field > i {
+  position: relative;
+  display: block;
+  font-style: normal;
+}
+.ow-placement-url-field input {
+  min-height: 48px;
+  padding-right: 54px;
+  font-size: 15px;
+}
+.ow-placement-url-field em {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 52px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-left: 1px solid #eceef1;
+  color: var(--ou-orange);
+  font-size: 26px;
+  font-style: normal;
+}
+.ow-placement-create-form > footer {
+  margin-top: auto;
+  padding: 18px 25px 26px;
+}
+.ow-placement-create-form > footer button {
+  min-height: 46px;
+  padding: 0 24px;
+  border: 1px solid #dcdfe4;
+  border-radius: 8px;
+  font-size: 15px;
+}
+.ow-modal-cancel {
+  background: #fff;
+}
+.ow-modal-submit:disabled {
+  color: #fff;
+  background: #a5abb5;
+  cursor: not-allowed;
+}
+.ow-ou-settings-tabs {
+  min-height: 72px;
+  justify-content: flex-start;
+}
+.ow-ou-settings-tabs button {
+  min-width: 145px;
+  font-size: 14px;
+}
+.ow-ou-settings-tabs button i {
+  width: 31px;
+  height: 31px;
+  font-size: 15px;
+}
+.ow-ou-panel {
+  padding: 24px;
+}
+.ow-ou-info {
+  margin-bottom: 24px;
+  padding: 20px;
+  font-size: 14px;
+}
+.ow-ou-card > h2 {
+  padding: 19px 24px;
+  font-size: 14px;
+}
+.ow-ou-card > form,
+.ow-ou-card > p,
+.ow-ou-card > .ow-ou-content-types,
+.ow-ou-card > div:not(.ow-ou-content-types) {
+  padding: 24px;
+}
+.ow-ou-general-grid,
+.ow-ou-currency-grid {
+  gap: 22px;
+}
+.ow-ou-general-grid label,
+.ow-ou-currency-grid label,
+.ow-ou-field,
+.ow-ou-general-grid b,
+.ow-ou-currency-grid b,
+.ow-ou-field > b,
+.ow-ou-traffic legend {
+  font-size: 14px;
+}
+.ow-ou-general-grid input,
+.ow-ou-currency-grid input,
+.ow-ou-currency-grid select,
+.ow-ou-field input,
+.ow-ou-field select {
+  min-height: 46px;
+  font-size: 14px;
+}
+.ow-ou-general-grid small,
+.ow-ou-currency-grid small,
+.ow-ou-help,
+.ow-ou-traffic > p {
+  font-size: 11px;
+}
+.ow-ou-traffic label {
+  min-height: 100px;
+  padding: 17px;
+}
+.ow-ou-traffic b {
+  font-size: 14px;
+}
+.ow-ou-traffic small,
+.ow-ou-traffic em {
+  font-size: 11px;
+}
+.ow-ou-form-actions button,
+.ow-ou-form-actions a,
+.ow-reset-secret {
+  min-height: 42px;
+  padding: 0 17px;
+  font-size: 13px;
+}
+.ow-ou-subtabs {
+  width: min(445px, calc(100% - 32px));
+  min-height: 48px;
+  gap: 0;
+  margin: 0 auto 32px;
+  border: 1px solid #e1e2e6;
+  border-radius: 12px;
+  padding: 4px;
+  background: #f4f4f6;
+}
+.ow-ou-subtabs button {
+  flex: 1;
+  border-radius: 9px;
+  padding: 0 16px;
+  font-size: 14px;
+}
+.ow-ou-subtabs button.active {
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(25, 28, 35, .08);
+}
+.ow-ou-subtabs button.active::after {
+  display: none;
+}
+.ow-ou-postback-card {
+  border: 0;
+  padding-top: 0;
+}
+.ow-ou-postback-card > form {
+  padding: 0;
+}
+.ow-ou-postback-url-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+.ow-ou-ip-check {
+  min-height: 46px;
+  margin: 0;
+  border: 1px solid #e1e3e7;
+  border-radius: 8px;
+  padding: 0 14px;
+  background: #fafafa;
+  font-size: 13px;
+}
+.ow-ou-optout-card {
+  margin-top: 24px;
+  border: 1px solid #e1e3e7;
+  border-radius: 10px;
+  padding: 15px 17px;
+  background: #fcfcfd;
+}
+.ow-ou-optout-card .ow-ou-checkbox {
+  margin: 0;
+  font-size: 13px;
+}
+.ow-ou-optout-card .ow-ou-checkbox span {
+  display: grid;
+  gap: 4px;
+}
+.ow-ou-optout-card small {
+  color: #9398a1;
+  font-size: 11px;
+  font-weight: 400;
+}
+.ow-ou-macros,
+.ow-ou-security {
+  margin-top: 26px;
+  padding-top: 22px;
+}
+.ow-ou-macros h3,
+.ow-ou-security h3,
+.ow-ou-specific-list h2,
+.ow-ou-doc-section h3 {
+  font-size: 16px;
+}
+.ow-ou-macros h3 i {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--ou-orange);
+  background: #fff2ea;
+  font-size: 13px;
+  font-style: normal;
+}
+.ow-ou-macros > p {
+  grid-template-columns: 150px 1fr;
+  padding: 9px 0;
+  font-size: 12px;
+}
+.ow-ou-macros > div,
+.ow-ou-secret-line small,
+.ow-ou-hash-grid span,
+.ow-ou-security > p {
+  font-size: 11px;
+}
+.ow-ou-security > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ow-reset-secret {
+  position: static;
+  border: 1px solid #d8dbe0;
+  border-radius: 7px;
+  color: #606772;
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+@media (max-width: 1080px) {
+  .ow-supplier-app {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+  .ow-supplier-sidebar {
+    width: 220px;
+  }
+  .ow-supplier-stage {
+    margin-left: 0;
+  }
+  .ow-supplier-nav a,
+  .ow-ou-nav-group > summary {
+    font-size: 12px;
+  }
+}
+@media (max-width: 760px) {
+  .ow-supplier-app {
+    display: block;
+  }
+  .ow-supplier-sidebar {
+    width: 100%;
+    padding: 14px;
+  }
+  .ow-supplier-stage {
+    margin-left: 0;
+  }
+  .ow-supplier-brand {
+    min-height: 64px;
+  }
+  .ow-supplier-main {
+    padding: 14px;
+  }
+  .ow-ou-placements-page .ow-apps-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .ow-ou-postback-url-row {
+    grid-template-columns: 1fr;
+  }
+  .ow-ou-ip-check {
+    width: 100%;
+  }
+}

@@ -155,7 +155,7 @@ class PublisherPlacementCreateForm(forms.ModelForm):
             "platform": forms.RadioSelect,
             "website_url": forms.URLInput(
                 attrs={
-                    "placeholder": "https://yourwebsite.com",
+                    "placeholder": "Enter website URL",
                     "autocomplete": "url",
                 }
             ),
@@ -164,6 +164,8 @@ class PublisherPlacementCreateForm(forms.ModelForm):
     def __init__(self, *args, publisher=None, **kwargs):
         self.publisher = publisher
         super().__init__(*args, **kwargs)
+        if not self.is_bound:
+            self.fields["platform"].initial = PublisherPlacement.Platform.WEB
 
     def clean_website_url(self):
         value = str(self.cleaned_data.get("website_url") or "").strip()

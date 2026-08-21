@@ -54,21 +54,19 @@
   </div>
 
   <div class="ow-ou-panel" data-settings-panel="postback" id="postback" hidden>
-    <nav class="ow-ou-subtabs"><button type="button" class="active" data-postback-tab="global">Global Postback</button><button type="button" data-postback-tab="specific">Specific Event Postback</button></nav>
+    <nav class="ow-ou-subtabs"><button type="button" class="active" data-postback-tab="global">◎ &nbsp; Global Postback</button><button type="button" data-postback-tab="specific">☷ &nbsp; Specific Event Postback</button></nav>
     <div data-postback-panel="global">
       <div class="ow-ou-info">ⓘ <span>Add your postback URL to receive real-time notifications on your server every time a conversion occurs. This is essential for rewarding your users automatically.</span></div>
       <section class="ow-ou-card ow-ou-postback-card">
         <form method="post" novalidate>{% csrf_token %}<input type="hidden" name="form_type" value="postback">
           {% if postback_form.non_field_errors %}<div class="ow-field-errors">{{ postback_form.non_field_errors }}</div>{% endif %}
-          <label class="ow-ou-field"><b>Postback URL <i>*</i></b><span class="ow-clearable">{{ postback_form.postback_url }}<button type="button" data-clear-postback aria-label="Clear Postback URL">×</button></span>{{ postback_form.postback_url.errors }}</label>
-          <label class="ow-ou-checkbox">{{ postback_form.whitelist_postback_ip }}<span>Whitelist IP: {{ postback_source_ip }}</span></label>
+          <div class="ow-ou-postback-url-row"><label class="ow-ou-field"><b>Postback URL <i>*</i></b><span class="ow-clearable">{{ postback_form.postback_url }}<button type="button" data-clear-postback aria-label="Clear Postback URL">×</button></span>{{ postback_form.postback_url.errors }}</label><label class="ow-ou-checkbox ow-ou-ip-check">{{ postback_form.whitelist_postback_ip }}<span>Whitelist IP: {{ postback_source_ip }}</span></label></div>
           <p class="ow-ou-help">We expect a response body of "1" for a successful postback.</p>
-          <label class="ow-ou-checkbox">{{ postback_form.postback_email_opt_out }}<span>Opt-out from postback email notifications</span></label>
-          <p class="ow-ou-help">Check this if you do not want to receive postback success/failure emails.</p>
+          <div class="ow-ou-optout-card"><label class="ow-ou-checkbox">{{ postback_form.postback_email_opt_out }}<span>✉ &nbsp; <b>Opt-out from postback email notifications</b><small>Check this if you do not want to receive postback success/failure emails.</small></span></label></div>
 
           {% include 'offerwall/includes/postback_macros.html' %}
           <section class="ow-ou-security">
-            <header><h3>Security &amp; Verification</h3></header>
+            <header><h3>Security &amp; Verification</h3><button type="submit" formaction="{% url 'offerwall:publisher-placement-action' placement.public_id %}" formmethod="post" name="action" value="rotate-postback-secret" class="ow-reset-secret" onclick="return confirm('Reset postback secret?');">Reset Postback Secret</button></header>
             <div class="ow-ou-secret-line"><span><small>Secret Token</small><code id="postback-secret">{{ placement.postback_secret_plain }}</code></span><button type="button" data-copy-target="postback-secret">Copy</button></div>
             <p>Used to verify postbacks originate from our system. Keep this private.</p>
             <div class="ow-ou-hash-grid"><div><span>Javascript Hash</span><button type="button" data-copy-target="js-hash">Copy</button><pre id="js-hash">const crypto = require('crypto');
@@ -82,7 +80,6 @@ const calculatedHash = crypto
           </section>
           <footer class="ow-ou-form-actions between"><button type="submit" formaction="{% url 'offerwall:publisher-placement-postback-test' placement.public_id %}" formmethod="post" class="secondary">Test Postback Connection</button><span><a href="{% url 'offerwall:publisher-placements' %}">Cancel</a><button type="submit">Save Configuration</button></span></footer>
         </form>
-        <form method="post" action="{% url 'offerwall:publisher-placement-action' placement.public_id %}" class="ow-reset-secret" onsubmit="return confirm('Reset postback secret?');">{% csrf_token %}<input type="hidden" name="action" value="rotate-postback-secret"><button type="submit">Reset Postback Secret</button></form>
       </section>
     </div>
     <div data-postback-panel="specific" hidden>
