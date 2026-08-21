@@ -424,6 +424,26 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(registration.reviewed_by, operator)
         self.assertTrue(pending_publisher.is_active)
 
+        self.client.logout()
+        login_response = self.client.post(
+            reverse("offerwall:supplier-login"),
+            {
+                "identity": "pending@example.test",
+                "password": "Strong-Pass-893!",
+            },
+        )
+        self.assertRedirects(
+            login_response,
+            reverse("offerwall:publisher-dashboard"),
+            fetch_redirect_response=False,
+        )
+        self.assertContains(
+            self.client.get(reverse("offerwall:publisher-dashboard")),
+            "Available balance",
+        )
+
+        self.client.force_login(operator)
+
         old_api_hash = pending_publisher.api_key_hash
         self.client.post(
             reverse("offerwall:operations-action"),
@@ -431,6 +451,48 @@ class OfferwallFlowTests(TestCase):
         )
         pending_publisher.refresh_from_db()
         self.assertNotEqual(pending_publisher.api_key_hash, old_api_hash)
+
+    def test_enabling_pending_supplier_also_approves_registration(self):
+        operator = get_user_model().objects.create_user(
+            username="enable-operator",
+            password="Strong-Pass-893!",
+            is_staff=True,
+        )
+        supplier_user = get_user_model().objects.create_user(
+            username="enable-owner",
+            email="enable@example.test",
+            password="Strong-Pass-893!",
+        )
+        publisher = Publisher.objects.create(
+            name="Enable Supplier",
+            slug="enable-supplier",
+            is_active=True,
+        )
+        registration = PublisherPortalAccount.objects.create(
+            user=supplier_user,
+            publisher=publisher,
+            contact_name="Enable Owner",
+            business_email="enable@example.test",
+            phone="+91 90000 22222",
+            country="India",
+        )
+        self.client.force_login(operator)
+
+        page = self.client.get(reverse("offerwall:operations"))
+        self.assertContains(page, "Approve registration")
+        response = self.client.post(
+            reverse("offerwall:operations-action"),
+            {"action": "toggle-publisher", "publisher_id": publisher.pk},
+        )
+        self.assertRedirects(
+            response, reverse("offerwall:operations"), fetch_redirect_response=False
+        )
+
+        registration.refresh_from_db()
+        publisher.refresh_from_db()
+        self.assertEqual(registration.status, PublisherPortalAccount.Status.APPROVED)
+        self.assertEqual(registration.reviewed_by, operator)
+        self.assertTrue(publisher.is_active)
 
     def _credit_click(self):
         click = self._click()

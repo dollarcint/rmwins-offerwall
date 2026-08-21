@@ -329,12 +329,29 @@ def offerwall_operations_action(request):
             )
         elif action == "toggle-publisher":
             publisher = get_object_or_404(Publisher, pk=request.POST.get("publisher_id"))
-            publisher.is_active = not publisher.is_active
-            publisher.save(update_fields=["is_active", "updated_at"])
-            messages.success(
-                request,
-                f"{publisher.name} is now {'active' if publisher.is_active else 'inactive'}.",
-            )
+            supplier_account = getattr(publisher, "portal_account", None)
+            if (
+                supplier_account
+                and supplier_account.status
+                != PublisherPortalAccount.Status.APPROVED
+            ):
+                review_publisher_registration(
+                    supplier_account,
+                    PublisherPortalAccount.Status.APPROVED,
+                    reviewer=request.user,
+                    admin_note="Publisher enabled from Offerwall Operations.",
+                )
+                messages.success(
+                    request,
+                    f"{publisher.name} registration approved and publisher enabled.",
+                )
+            else:
+                publisher.is_active = not publisher.is_active
+                publisher.save(update_fields=["is_active", "updated_at"])
+                messages.success(
+                    request,
+                    f"{publisher.name} is now {'active' if publisher.is_active else 'inactive'}.",
+                )
         elif action == "rotate-api-key":
             publisher = get_object_or_404(Publisher, pk=request.POST.get("publisher_id"))
             raw_key = publisher.rotate_api_key()
