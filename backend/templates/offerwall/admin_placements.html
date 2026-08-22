@@ -1,0 +1,44 @@
+{% extends 'offerwall/admin_base.html' %}
+{% block title %}Placements · RM Wins Admin{% endblock %}
+{% block page_name %}Placements{% endblock %}
+{% block content %}
+<section class="rmw-admin-page-heading">
+  <div><p class="rmw-admin-kicker">Integration control</p><h1>Publisher placements</h1><p>Review every app or website integration, traffic state and postback configuration.</p></div>
+</section>
+
+<section class="rmw-admin-stat-grid rmw-admin-stat-grid-compact">
+  <article class="accent"><span>Total placements</span><strong>{{ placement_stats.total }}</strong><small>all supplier integrations</small></article>
+  <article><span>Active</span><strong>{{ placement_stats.active }}</strong><small>accepting respondent traffic</small></article>
+  <article><span>Paused</span><strong>{{ placement_stats.paused }}</strong><small>temporarily unavailable</small></article>
+  <article><span>Postbacks enabled</span><strong>{{ placement_stats.postbacks }}</strong><small>configured callbacks</small></article>
+</section>
+
+<section class="rmw-admin-card rmw-admin-filter-card">
+  <form method="get" class="rmw-admin-filter-grid rmw-admin-operations-filters">
+    <label class="wide"><span>Search placements</span><input type="search" name="q" value="{{ filters.q }}" placeholder="App ID, website, URL or supplier"></label>
+    <label><span>Supplier</span><select name="publisher"><option value="">All suppliers</option>{% for item in publishers %}<option value="{{ item.public_id }}" {% if filters.publisher == item.public_id|stringformat:'s' %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
+    <label><span>Status</span><select name="status"><option value="all">All statuses</option>{% for value,label in status_choices %}<option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label><span>Platform</span><select name="platform"><option value="all">All platforms</option>{% for value,label in platform_choices %}<option value="{{ value }}" {% if filters.platform == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label><span>Postback</span><select name="postback"><option value="all">Any configuration</option><option value="enabled" {% if filters.postback == 'enabled' %}selected{% endif %}>Enabled</option><option value="disabled" {% if filters.postback == 'disabled' %}selected{% endif %}>Disabled</option></select></label>
+    <button type="submit">Apply</button><a href="{% url 'offerwall:admin-placements' %}">Reset</a>
+  </form>
+</section>
+
+<section class="rmw-admin-card rmw-admin-table-card">
+  <div class="rmw-admin-card-head"><div><span>Placement registry</span><h2>{{ page.paginator.count }} integrations</h2></div><small>Historical attribution remains unchanged</small></div>
+  <div class="rmw-admin-table-wrap"><table class="rmw-admin-operations-table"><thead><tr><th>Placement</th><th>Supplier</th><th>Platform</th><th>Traffic</th><th>Audience</th><th>Clicks / completes</th><th>Postback</th><th>Created</th><th>Control</th></tr></thead><tbody>
+    {% for placement in page.object_list %}<tr>
+      <td><strong>{{ placement.website_name }}</strong><small>{{ placement.name }}</small><code>{{ placement.app_id }}</code><a class="rmw-admin-mini-link" href="{{ placement.website_url }}" rel="noopener noreferrer" target="_blank">{{ placement.website_url|truncatechars:48 }}</a></td>
+      <td><strong>{{ placement.publisher.name }}</strong><small>#{{ placement.publisher.publisher_code }}</small></td>
+      <td><span class="rmw-admin-country-code">{{ placement.get_platform_display }}</span><small>{{ placement.get_traffic_type_display }}</small></td>
+      <td><span class="rmw-admin-status {{ placement.status }}">{{ placement.get_status_display }}</span><small>{{ placement.visit_count }} visits</small></td>
+      <td><strong>{{ placement.respondent_count }}</strong><small>respondents</small></td>
+      <td><strong>{{ placement.click_count }} / {{ placement.verified_complete_count }}</strong><small>clicks / verified</small></td>
+      <td><span class="rmw-admin-status {% if placement.postback_enabled %}active{% endif %}">{{ placement.postback_enabled|yesno:'Enabled,Disabled' }}</span><small>{% if placement.postback_url %}Configured{% else %}No global URL{% endif %}</small>{% if placement.postback_enabled %}<form method="post" class="rmw-admin-compact-action" onsubmit="return confirm('Disable postbacks for this placement?');">{% csrf_token %}<input type="hidden" name="placement_id" value="{{ placement.public_id }}"><input type="hidden" name="action" value="disable-postback"><button type="submit">Disable callback</button></form>{% endif %}</td>
+      <td>{{ placement.created_at|date:'d M Y' }}<small>{{ placement.created_at|date:'H:i' }}</small></td>
+      <td><div class="rmw-admin-lifecycle-actions">{% if placement.status == 'active' %}<form method="post">{% csrf_token %}<input type="hidden" name="placement_id" value="{{ placement.public_id }}"><input type="hidden" name="action" value="pause"><button type="submit" class="warn">Pause</button></form>{% else %}<form method="post">{% csrf_token %}<input type="hidden" name="placement_id" value="{{ placement.public_id }}"><input type="hidden" name="action" value="activate"><button type="submit" class="approve">Activate</button></form>{% endif %}{% if placement.status != 'archived' %}<form method="post" onsubmit="return confirm('Archive this placement?');">{% csrf_token %}<input type="hidden" name="placement_id" value="{{ placement.public_id }}"><input type="hidden" name="action" value="archive"><button type="submit" class="reject">Archive</button></form>{% endif %}</div></td>
+    </tr>{% empty %}<tr><td colspan="9">No placements match these filters.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <nav class="rmw-admin-pagination">{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&amp;q={{ filters.q|urlencode }}&amp;publisher={{ filters.publisher }}&amp;status={{ filters.status }}&amp;platform={{ filters.platform }}&amp;postback={{ filters.postback }}">← Previous</a>{% else %}<span></span>{% endif %}<strong>{{ page.number }} / {{ page.paginator.num_pages }}</strong>{% if page.has_next %}<a href="?page={{ page.next_page_number }}&amp;q={{ filters.q|urlencode }}&amp;publisher={{ filters.publisher }}&amp;status={{ filters.status }}&amp;platform={{ filters.platform }}&amp;postback={{ filters.postback }}">Next →</a>{% else %}<span></span>{% endif %}</nav>
+</section>
+{% endblock %}

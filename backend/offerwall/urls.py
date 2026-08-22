@@ -25,6 +25,16 @@ urlpatterns = [
         name="admin-suppliers",
     ),
     path(
+        "admin-portal/placements/",
+        views.admin_portal_placements,
+        name="admin-placements",
+    ),
+    path(
+        "admin-portal/respondents/",
+        views.admin_portal_respondents,
+        name="admin-respondents",
+    ),
+    path(
         "admin-portal/conversions/",
         views.admin_portal_conversions,
         name="admin-conversions",
@@ -33,6 +43,11 @@ urlpatterns = [
         "admin-portal/billing/",
         views.admin_portal_billing,
         name="admin-billing",
+    ),
+    path(
+        "admin-portal/postbacks/",
+        views.admin_portal_postbacks,
+        name="admin-postbacks",
     ),
     path(
         "admin-portal/activity/",

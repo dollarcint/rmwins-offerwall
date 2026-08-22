@@ -1,0 +1,39 @@
+{% extends 'offerwall/admin_base.html' %}
+{% block title %}Postbacks · RM Wins Admin{% endblock %}
+{% block page_name %}Postbacks{% endblock %}
+{% block content %}
+<section class="rmw-admin-page-heading">
+  <div><p class="rmw-admin-kicker">Delivery operations</p><h1>Postback monitor</h1><p>Inspect callback health, delivery responses and controlled retries for supplier events.</p></div>
+  <span class="rmw-admin-live"><i></i>{{ postback_stats.delivery_rate }}% delivered</span>
+</section>
+
+<section class="rmw-admin-stat-grid rmw-admin-stat-grid-compact">
+  <article class="accent"><span>Total deliveries</span><strong>{{ postback_stats.total }}</strong><small>all outcome callbacks</small></article>
+  <article><span>Delivered</span><strong>{{ postback_stats.delivered }}</strong><small>HTTP 2xx with body 1</small></article>
+  <article><span>Failed</span><strong>{{ postback_stats.failed }}</strong><small>need configuration or retry</small></article>
+  <article><span>Pending</span><strong>{{ postback_stats.pending }}</strong><small>queued for delivery</small></article>
+</section>
+
+<section class="rmw-admin-card rmw-admin-filter-card">
+  <form method="get" class="rmw-admin-filter-grid">
+    <label class="wide"><span>Search deliveries</span><input type="search" name="q" value="{{ filters.q }}" placeholder="Delivery ID, respondent, survey or supplier"></label>
+    <label><span>Supplier</span><select name="publisher"><option value="">All suppliers</option>{% for item in publishers %}<option value="{{ item.public_id }}" {% if filters.publisher == item.public_id|stringformat:'s' %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
+    <label><span>Status</span><select name="status"><option value="all">All statuses</option>{% for value,label in status_choices %}<option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label><span>Event</span><select name="event"><option value="all">All events</option>{% for item in event_choices %}<option value="{{ item }}" {% if filters.event == item %}selected{% endif %}>{{ item|title }}</option>{% endfor %}</select></label>
+    <button type="submit">Apply</button><a href="{% url 'offerwall:admin-postbacks' %}">Reset</a>
+  </form>
+</section>
+
+<section class="rmw-admin-card rmw-admin-table-card">
+  <div class="rmw-admin-card-head"><div><span>Delivery ledger</span><h2>{{ page.paginator.count }} callbacks</h2></div><small>Redirects blocked · public HTTPS only</small></div>
+  <div class="rmw-admin-postback-list">
+    {% for delivery in page.object_list %}<article class="rmw-admin-postback-row">
+      <div class="rmw-admin-postback-main"><span class="rmw-admin-status {{ delivery.status }}">{{ delivery.get_status_display }}</span><h3>{{ delivery.event_type|title }} · {{ delivery.publisher.name }}</h3><p>{{ delivery.click.external_user_id }} · Survey {{ delivery.click.survey.local_id }}</p><code>{{ delivery.public_id }}</code></div>
+      <dl><div><dt>Placement</dt><dd>{{ delivery.placement.website_name|default:'Publisher default' }}</dd></div><div><dt>Attempts</dt><dd>{{ delivery.attempt_count }}</dd></div><div><dt>HTTP</dt><dd>{{ delivery.response_code|default:'—' }}</dd></div><div><dt>Created</dt><dd>{{ delivery.created_at|date:'d M Y, H:i' }}</dd></div></dl>
+      <div class="rmw-admin-postback-detail"><small>Callback</small><code>{{ delivery.callback_url|truncatechars:92|default:'Not configured' }}</code>{% if delivery.last_error %}<p>{{ delivery.last_error|truncatechars:180 }}</p>{% elif delivery.delivered_at %}<p class="success">Delivered {{ delivery.delivered_at|date:'d M Y, H:i' }}</p>{% endif %}{% if delivery.next_attempt_at %}<small>Automatic retry {{ delivery.next_attempt_at|timeuntil }}</small>{% endif %}</div>
+      <div class="rmw-admin-lifecycle-actions">{% if delivery.status == 'failed' or delivery.status == 'skipped' %}<form method="post" onsubmit="return confirm('Queue one controlled retry for this postback?');">{% csrf_token %}<input type="hidden" name="delivery_id" value="{{ delivery.public_id }}"><input type="hidden" name="action" value="retry"><button type="submit" class="approve">Retry now</button></form>{% else %}<small>No manual action</small>{% endif %}</div>
+    </article>{% empty %}<p class="rmw-admin-empty">No postbacks match these filters.</p>{% endfor %}
+  </div>
+  <nav class="rmw-admin-pagination">{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&amp;q={{ filters.q|urlencode }}&amp;publisher={{ filters.publisher }}&amp;status={{ filters.status }}&amp;event={{ filters.event }}">← Previous</a>{% else %}<span></span>{% endif %}<strong>{{ page.number }} / {{ page.paginator.num_pages }}</strong>{% if page.has_next %}<a href="?page={{ page.next_page_number }}&amp;q={{ filters.q|urlencode }}&amp;publisher={{ filters.publisher }}&amp;status={{ filters.status }}&amp;event={{ filters.event }}">Next →</a>{% else %}<span></span>{% endif %}</nav>
+</section>
+{% endblock %}

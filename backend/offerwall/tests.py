@@ -144,6 +144,28 @@ class OfferwallFlowTests(TestCase):
         profile.save()
         return profile
 
+    def _open_admin_session(self, *, suffix="admin"):
+        password = "Offerwall-Admin-9472"
+        user = get_user_model().objects.create_user(
+            username=f"offerwall-{suffix}",
+            password=password,
+            is_staff=True,
+        )
+        OfferwallAdminPortalAccount.objects.create(
+            user=user,
+            must_change_password=False,
+        )
+        response = self.client.post(
+            reverse("offerwall:admin-login"),
+            {"username": user.username, "password": password},
+        )
+        self.assertRedirects(
+            response,
+            reverse("offerwall:admin-dashboard"),
+            fetch_redirect_response=False,
+        )
+        return user
+
     def test_publisher_generates_one_way_api_key_and_encrypted_signing_secret(self):
         self.assertTrue(self.api_key.startswith("ow_live_"))
         self.assertNotIn(self.api_key, self.publisher.api_key_hash)
@@ -788,6 +810,209 @@ class OfferwallFlowTests(TestCase):
             },
         )
         self.assertEqual(offer_catalog(self.publisher, visit), [])
+
+    def test_new_admin_controls_supplier_lifecycle(self):
+        admin_user = self._open_admin_session(suffix="supplier-lifecycle")
+        supplier_user = get_user_model().objects.create_user(
+            username="lifecycle-supplier",
+            email="lifecycle@supplier.example",
+            password="Supplier-Password-9472",
+        )
+        supplier = Publisher.objects.create(
+            name="Lifecycle Supplier",
+            slug="lifecycle-supplier",
+            is_active=False,
+        )
+        registration = PublisherPortalAccount.objects.create(
+            user=supplier_user,
+            publisher=supplier,
+            contact_name="Lifecycle Owner",
+            business_email="lifecycle@supplier.example",
+            country="India",
+        )
+
+        page = self.client.get(
+            reverse("offerwall:admin-suppliers"),
+            {"status": "pending"},
+        )
+        self.assertContains(page, "Lifecycle Supplier")
+        self.assertContains(page, "Approve")
+        self.assertContains(page, reverse("offerwall:admin-placements"))
+        self.assertContains(page, reverse("offerwall:admin-respondents"))
+        self.assertContains(page, reverse("offerwall:admin-postbacks"))
+
+        approved = self.client.post(
+            reverse("offerwall:admin-suppliers"),
+            {
+                "action": "approve",
+                "publisher_id": supplier.public_id,
+                "admin_note": "Commercial review complete.",
+            },
+        )
+        self.assertEqual(approved.status_code, 302)
+        registration.refresh_from_db()
+        supplier.refresh_from_db()
+        self.assertEqual(registration.status, PublisherPortalAccount.Status.APPROVED)
+        self.assertEqual(registration.reviewed_by, admin_user)
+        self.assertTrue(supplier.is_active)
+
+        self.client.post(
+            reverse("offerwall:admin-suppliers"),
+            {"action": "disable", "publisher_id": supplier.public_id},
+        )
+        supplier.refresh_from_db()
+        registration.refresh_from_db()
+        self.assertFalse(supplier.is_active)
+        self.assertEqual(registration.status, PublisherPortalAccount.Status.APPROVED)
+
+        self.client.post(
+            reverse("offerwall:admin-suppliers"),
+            {"action": "enable", "publisher_id": supplier.public_id},
+        )
+        supplier.refresh_from_db()
+        self.assertTrue(supplier.is_active)
+
+        self.client.post(
+            reverse("offerwall:admin-suppliers"),
+            {
+                "action": "reject",
+                "publisher_id": supplier.public_id,
+                "admin_note": "Compliance review failed.",
+            },
+        )
+        registration.refresh_from_db()
+        supplier.refresh_from_db()
+        self.assertEqual(registration.status, PublisherPortalAccount.Status.REJECTED)
+        self.assertFalse(supplier.is_active)
+
+    def test_new_admin_moderates_placements_and_respondents(self):
+        self._open_admin_session(suffix="audience-ops")
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Admin controlled wall",
+            website_name="Admin Audience Site",
+            website_url="https://admin-audience.example.test",
+            postback_enabled=True,
+            postback_url="https://admin-audience.example.test/postback?uid={SID}",
+        )
+        respondent = self._verified_respondent(
+            sid="admin-audience-user",
+            placement=placement,
+            email="audience-user@example.test",
+        )
+        visit = create_wall_visit(
+            self.publisher,
+            external_user_id=respondent.external_user_id,
+            nonce="admin_audience_visit_nonce",
+            entry_timestamp=timezone.now(),
+            placement=placement,
+            respondent=respondent,
+        )
+        visit.country_code = "US"
+        visit.save(update_fields=["country_code"])
+        self._click(visit=visit)
+
+        placement_page = self.client.get(reverse("offerwall:admin-placements"))
+        self.assertContains(placement_page, "Admin Audience Site")
+        self.assertContains(placement_page, placement.app_id)
+        self.assertContains(placement_page, "1 visits")
+        self.client.post(
+            reverse("offerwall:admin-placements"),
+            {"action": "pause", "placement_id": placement.public_id},
+        )
+        placement.refresh_from_db()
+        self.assertEqual(placement.status, PublisherPlacement.Status.PAUSED)
+        self.client.post(
+            reverse("offerwall:admin-placements"),
+            {"action": "disable-postback", "placement_id": placement.public_id},
+        )
+        placement.refresh_from_db()
+        self.assertFalse(placement.postback_enabled)
+
+        respondent_page = self.client.get(
+            reverse("offerwall:admin-respondents"),
+            {"q": "audience-user@example.test"},
+        )
+        self.assertContains(respondent_page, "admin-audience-user")
+        self.assertContains(respondent_page, "audience-user@example.test")
+        self.client.post(
+            reverse("offerwall:admin-respondents"),
+            {
+                "action": "ban",
+                "respondent_id": respondent.public_id,
+                "reason": "Repeated quality failures",
+            },
+        )
+        respondent.refresh_from_db()
+        self.assertTrue(respondent.is_banned)
+        self.assertEqual(respondent.ban_reason, "Repeated quality failures")
+        self.client.post(
+            reverse("offerwall:admin-respondents"),
+            {"action": "unban", "respondent_id": respondent.public_id},
+        )
+        respondent.refresh_from_db()
+        self.assertFalse(respondent.is_banned)
+
+    @patch("offerwall.tasks.deliver_postback_task.delay")
+    def test_new_admin_monitors_and_retries_only_failed_postbacks(self, delay):
+        self._open_admin_session(suffix="postback-ops")
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Postback operations wall",
+            website_name="Postback Operations",
+            website_url="https://postback-ops.example.test",
+            postback_enabled=True,
+            postback_url="https://postback-ops.example.test/callback?uid={SID}",
+        )
+        visit = create_wall_visit(
+            self.publisher,
+            external_user_id="postback-admin-user",
+            nonce="postback_admin_visit_nonce",
+            entry_timestamp=timezone.now(),
+            placement=placement,
+        )
+        click = self._click(visit=visit)
+        delivery = PostbackDelivery.objects.create(
+            publisher=self.publisher,
+            placement=placement,
+            click=click,
+            event_type="complete",
+            callback_url="https://postback-ops.example.test/callback?uid=postback-admin-user",
+            payload={"transaction_id": "txn-admin-postback"},
+            status=PostbackDelivery.Status.FAILED,
+            attempt_count=3,
+            response_code=500,
+            last_error='Publisher must return body "1"',
+        )
+
+        page = self.client.get(
+            reverse("offerwall:admin-postbacks"),
+            {"status": "failed"},
+        )
+        self.assertContains(page, "Postback Operations")
+        self.assertContains(page, "Retry now")
+        self.assertNotContains(page, "txn-admin-postback")
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse("offerwall:admin-postbacks"),
+                {"action": "retry", "delivery_id": delivery.public_id},
+            )
+        self.assertEqual(response.status_code, 302)
+        delivery.refresh_from_db()
+        self.assertEqual(delivery.status, PostbackDelivery.Status.PENDING)
+        delay.assert_called_once_with(delivery.pk)
+
+        delivery.status = PostbackDelivery.Status.DELIVERED
+        delivery.save(update_fields=["status", "updated_at"])
+        delay.reset_mock()
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(
+                reverse("offerwall:admin-postbacks"),
+                {"action": "retry", "delivery_id": delivery.public_id},
+            )
+        delivery.refresh_from_db()
+        self.assertEqual(delivery.status, PostbackDelivery.Status.DELIVERED)
+        delay.assert_not_called()
 
     def test_admin_monthly_billing_generates_and_settles_statement(self):
         admin_user = get_user_model().objects.create_user(

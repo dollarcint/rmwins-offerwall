@@ -893,47 +893,96 @@ def admin_portal_suppliers(request):
     if denied:
         return denied
     if request.method == "POST":
+        action = str(request.POST.get("action") or "save-controls").strip().lower()
         publisher_id = str(request.POST.get("publisher_id") or "").strip()
-        raw_payout = str(request.POST.get("payout_percent") or "").strip()
-        raw_hold = str(request.POST.get("reward_hold_hours") or "").strip()
-        raw_threshold = str(request.POST.get("risk_review_threshold") or "").strip()
         try:
-            publisher = Publisher.objects.get(public_id=publisher_id)
-            payout_percent = Decimal(raw_payout).quantize(Decimal("0.01"))
-            if payout_percent < 0 or payout_percent > 100:
-                raise ValueError
-            reward_hold_hours = int(raw_hold or publisher.reward_hold_hours)
-            risk_review_threshold = int(
-                raw_threshold or publisher.risk_review_threshold
+            publisher = Publisher.objects.select_related("portal_account").get(
+                public_id=publisher_id
             )
-            if not 0 <= reward_hold_hours <= 720:
-                raise ValueError
-            if not 0 <= risk_review_threshold <= 100:
-                raise ValueError
-        except (ArithmeticError, ValidationError, ValueError, Publisher.DoesNotExist):
-            messages.error(
-                request,
-                "Enter a valid payout (0–100%), hold (0–720 hours) and risk threshold (0–100).",
+            registration = getattr(publisher, "portal_account", None)
+            if action in {"approve", "reject"}:
+                if registration is None:
+                    raise ValidationError("This supplier has no portal registration.")
+                review_status = (
+                    PublisherPortalAccount.Status.APPROVED
+                    if action == "approve"
+                    else PublisherPortalAccount.Status.REJECTED
+                )
+                review_publisher_registration(
+                    registration,
+                    review_status,
+                    reviewer=account.user,
+                    admin_note=request.POST.get("admin_note", ""),
+                )
+                messages.success(
+                    request,
+                    f"{publisher.name} registration marked {review_status}.",
+                )
+            elif action in {"enable", "disable"}:
+                if action == "enable" and registration and (
+                    registration.status != PublisherPortalAccount.Status.APPROVED
+                ):
+                    review_publisher_registration(
+                        registration,
+                        PublisherPortalAccount.Status.APPROVED,
+                        reviewer=account.user,
+                        admin_note=(
+                            request.POST.get("admin_note", "")
+                            or "Supplier approved while enabling the account."
+                        ),
+                    )
+                else:
+                    publisher.is_active = action == "enable"
+                    publisher.save(update_fields=["is_active", "updated_at"])
+                messages.success(
+                    request,
+                    f"{publisher.name} is now {'active' if action == 'enable' else 'disabled'}.",
+                )
+            elif action == "save-controls":
+                raw_payout = str(request.POST.get("payout_percent") or "").strip()
+                raw_hold = str(request.POST.get("reward_hold_hours") or "").strip()
+                raw_threshold = str(
+                    request.POST.get("risk_review_threshold") or ""
+                ).strip()
+                payout_percent = Decimal(raw_payout).quantize(Decimal("0.01"))
+                if payout_percent < 0 or payout_percent > 100:
+                    raise ValueError
+                reward_hold_hours = int(raw_hold or publisher.reward_hold_hours)
+                risk_review_threshold = int(
+                    raw_threshold or publisher.risk_review_threshold
+                )
+                if not 0 <= reward_hold_hours <= 720:
+                    raise ValueError
+                if not 0 <= risk_review_threshold <= 100:
+                    raise ValueError
+                publisher.payout_percent = payout_percent
+                publisher.reward_hold_hours = reward_hold_hours
+                publisher.risk_review_threshold = risk_review_threshold
+                publisher.save(
+                    update_fields=[
+                        "payout_percent",
+                        "reward_hold_hours",
+                        "risk_review_threshold",
+                        "updated_at",
+                    ]
+                )
+                messages.success(
+                    request,
+                    f"{publisher.name} commercial and risk controls were updated.",
+                )
+            else:
+                raise ValidationError("Unknown supplier action.")
+        except (ArithmeticError, ValidationError, ValueError, Publisher.DoesNotExist) as exc:
+            message = (
+                " ".join(exc.messages)
+                if isinstance(exc, ValidationError)
+                else "Supplier action failed. Check the submitted values."
             )
-        else:
-            publisher.payout_percent = payout_percent
-            publisher.reward_hold_hours = reward_hold_hours
-            publisher.risk_review_threshold = risk_review_threshold
-            publisher.save(
-                update_fields=[
-                    "payout_percent",
-                    "reward_hold_hours",
-                    "risk_review_threshold",
-                    "updated_at",
-                ]
-            )
-            messages.success(
-                request,
-                f"{publisher.name} commercial and risk controls were updated.",
-            )
+            messages.error(request, message)
         return _no_store(HttpResponseRedirect(reverse("offerwall:admin-suppliers")))
 
     query = str(request.GET.get("q") or "").strip()
+    status = str(request.GET.get("status") or "all").strip().lower()
     publishers = Publisher.objects.select_related("portal_account").annotate(
         placement_count=Count("placements", distinct=True),
         respondent_count=Count("respondents", distinct=True),
@@ -953,18 +1002,31 @@ def admin_portal_suppliers(request):
             | Q(slug__icontains=query)
             | Q(portal_account__business_email__icontains=query)
         )
-    publishers = list(publishers.order_by("-is_active", "name"))
-    for publisher in publishers:
+    if status == "active":
+        publishers = publishers.filter(is_active=True)
+    elif status == "inactive":
+        publishers = publishers.filter(is_active=False)
+    elif status in {
+        PublisherPortalAccount.Status.PENDING,
+        PublisherPortalAccount.Status.APPROVED,
+        PublisherPortalAccount.Status.REJECTED,
+    }:
+        publishers = publishers.filter(portal_account__status=status)
+    else:
+        status = "all"
+    paginator = Paginator(publishers.order_by("-is_active", "name"), 25)
+    page = paginator.get_page(request.GET.get("page"))
+    for publisher in page.object_list:
         publisher.platform_cut_percent = Decimal("100.00") - publisher.payout_percent
         publisher.conversion_rate = _admin_percentage(
             publisher.verified_complete_count, publisher.click_count
         )
-    paginator = Paginator(publishers, 25)
     context = _admin_base_context(account, "suppliers")
     context.update(
         {
-            "page": paginator.get_page(request.GET.get("page")),
+            "page": page,
             "query": query,
+            "status": status,
             "supplier_stats": {
                 "total": Publisher.objects.count(),
                 "active": Publisher.objects.filter(is_active=True).count(),
@@ -974,6 +1036,232 @@ def admin_portal_suppliers(request):
         }
     )
     return _no_store(render(request, "offerwall/admin_suppliers.html", context))
+
+
+@require_http_methods(["GET", "POST"])
+def admin_portal_placements(request):
+    account, denied = _admin_portal_or_response(request)
+    if denied:
+        return denied
+    if request.method == "POST":
+        action = str(request.POST.get("action") or "").strip().lower()
+        placement = get_object_or_404(
+            PublisherPlacement.objects.select_related("publisher"),
+            public_id=request.POST.get("placement_id"),
+        )
+        try:
+            status_map = {
+                "activate": PublisherPlacement.Status.ACTIVE,
+                "pause": PublisherPlacement.Status.PAUSED,
+                "archive": PublisherPlacement.Status.ARCHIVED,
+            }
+            if action in status_map:
+                target_status = status_map[action]
+                if (
+                    target_status == PublisherPlacement.Status.ACTIVE
+                    and not placement.publisher.is_active
+                ):
+                    raise ValidationError(
+                        "Enable the supplier before activating this placement."
+                    )
+                placement.status = target_status
+                placement.save(update_fields=["status", "updated_at"])
+                messages.success(
+                    request,
+                    f"{placement.website_name} placement marked {target_status}.",
+                )
+            elif action == "disable-postback":
+                placement.postback_enabled = False
+                placement.save(update_fields=["postback_enabled", "updated_at"])
+                messages.success(
+                    request,
+                    f"Postbacks were disabled for {placement.website_name}.",
+                )
+            else:
+                raise ValidationError("Unknown placement action.")
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+        return _no_store(HttpResponseRedirect(reverse("offerwall:admin-placements")))
+
+    placements = PublisherPlacement.objects.select_related("publisher").annotate(
+        visit_count=Count("visits", distinct=True),
+        respondent_count=Count("visits__respondent", distinct=True),
+        click_count=Count("visits__clicks", distinct=True),
+        verified_complete_count=Count(
+            "visits__clicks",
+            filter=Q(
+                visits__clicks__status=SurveyAttempt.Status.COMPLETED,
+                visits__clicks__is_verified=True,
+            ),
+            distinct=True,
+        ),
+    )
+    query = str(request.GET.get("q") or "").strip()[:160]
+    publisher_id = str(request.GET.get("publisher") or "").strip()
+    status = str(request.GET.get("status") or "all").strip().lower()
+    platform = str(request.GET.get("platform") or "all").strip().lower()
+    postback = str(request.GET.get("postback") or "all").strip().lower()
+    if query:
+        search_filter = (
+            Q(name__icontains=query)
+            | Q(website_name__icontains=query)
+            | Q(website_url__icontains=query)
+            | Q(publisher__name__icontains=query)
+        )
+        try:
+            public_id = _app_uuid_from_id(query) or uuid.UUID(query)
+        except (TypeError, ValueError):
+            public_id = None
+        if public_id:
+            search_filter |= Q(public_id=public_id)
+        placements = placements.filter(search_filter)
+    if publisher_id:
+        try:
+            placements = placements.filter(publisher__public_id=uuid.UUID(publisher_id))
+        except (TypeError, ValueError):
+            publisher_id = ""
+    if status in {value for value, _ in PublisherPlacement.Status.choices}:
+        placements = placements.filter(status=status)
+    else:
+        status = "all"
+    if platform in {value for value, _ in PublisherPlacement.Platform.choices}:
+        placements = placements.filter(platform=platform)
+    else:
+        platform = "all"
+    if postback == "enabled":
+        placements = placements.filter(postback_enabled=True)
+    elif postback == "disabled":
+        placements = placements.filter(postback_enabled=False)
+    else:
+        postback = "all"
+
+    all_placements = PublisherPlacement.objects.all()
+    context = _admin_base_context(account, "placements")
+    context.update(
+        {
+            "page": Paginator(placements.order_by("-created_at"), 30).get_page(
+                request.GET.get("page")
+            ),
+            "filters": {
+                "q": query,
+                "publisher": publisher_id,
+                "status": status,
+                "platform": platform,
+                "postback": postback,
+            },
+            "publishers": Publisher.objects.order_by("name"),
+            "status_choices": PublisherPlacement.Status.choices,
+            "platform_choices": PublisherPlacement.Platform.choices,
+            "placement_stats": {
+                "total": all_placements.count(),
+                "active": all_placements.filter(
+                    status=PublisherPlacement.Status.ACTIVE
+                ).count(),
+                "paused": all_placements.filter(
+                    status=PublisherPlacement.Status.PAUSED
+                ).count(),
+                "postbacks": all_placements.filter(postback_enabled=True).count(),
+            },
+        }
+    )
+    return _no_store(render(request, "offerwall/admin_placements.html", context))
+
+
+@require_http_methods(["GET", "POST"])
+def admin_portal_respondents(request):
+    account, denied = _admin_portal_or_response(request)
+    if denied:
+        return denied
+    if request.method == "POST":
+        respondent = get_object_or_404(
+            RespondentProfile.objects.select_related("publisher"),
+            public_id=request.POST.get("respondent_id"),
+        )
+        action = str(request.POST.get("action") or "").strip().lower()
+        if action == "ban":
+            respondent.is_banned = True
+            respondent.banned_at = timezone.now()
+            respondent.ban_reason = str(
+                request.POST.get("reason") or "Banned by Offerwall administrator."
+            ).strip()[:255]
+            respondent.save(
+                update_fields=["is_banned", "banned_at", "ban_reason", "updated_at"]
+            )
+            messages.success(
+                request,
+                f"{respondent.external_user_id} was banned across {respondent.publisher.name}.",
+            )
+        elif action == "unban":
+            respondent.is_banned = False
+            respondent.banned_at = None
+            respondent.ban_reason = ""
+            respondent.save(
+                update_fields=["is_banned", "banned_at", "ban_reason", "updated_at"]
+            )
+            messages.success(request, f"{respondent.external_user_id} was unbanned.")
+        else:
+            messages.error(request, "Unknown respondent action.")
+        return _no_store(HttpResponseRedirect(reverse("offerwall:admin-respondents")))
+
+    respondents = RespondentProfile.objects.select_related(
+        "publisher", "first_placement", "last_placement"
+    ).annotate(
+        visit_count=Count("visits", distinct=True),
+        click_count=Count("visits__clicks", distinct=True),
+        completed_count=Count(
+            "visits__clicks",
+            filter=Q(
+                visits__clicks__status=SurveyAttempt.Status.COMPLETED,
+                visits__clicks__is_verified=True,
+            ),
+            distinct=True,
+        ),
+        last_activity_at=Max("visits__last_seen_at"),
+    )
+    query = str(request.GET.get("q") or "").strip()[:254]
+    publisher_id = str(request.GET.get("publisher") or "").strip()
+    status = str(request.GET.get("status") or "all").strip().lower()
+    if query:
+        if "@" in query:
+            respondents = respondents.filter(email_hash=respondent_email_hash(query))
+        else:
+            respondents = respondents.filter(external_user_id__icontains=query)
+    if publisher_id:
+        try:
+            respondents = respondents.filter(publisher__public_id=uuid.UUID(publisher_id))
+        except (TypeError, ValueError):
+            publisher_id = ""
+    if status == "verified":
+        respondents = respondents.filter(is_email_verified=True, is_banned=False)
+    elif status == "unverified":
+        respondents = respondents.filter(is_email_verified=False, is_banned=False)
+    elif status == "banned":
+        respondents = respondents.filter(is_banned=True)
+    else:
+        status = "all"
+
+    all_respondents = RespondentProfile.objects.all()
+    context = _admin_base_context(account, "respondents")
+    context.update(
+        {
+            "page": Paginator(respondents.order_by("-last_seen_at"), 30).get_page(
+                request.GET.get("page")
+            ),
+            "filters": {"q": query, "publisher": publisher_id, "status": status},
+            "publishers": Publisher.objects.order_by("name"),
+            "respondent_stats": {
+                "total": all_respondents.count(),
+                "verified": all_respondents.filter(
+                    is_email_verified=True, is_banned=False
+                ).count(),
+                "unverified": all_respondents.filter(
+                    is_email_verified=False, is_banned=False
+                ).count(),
+                "banned": all_respondents.filter(is_banned=True).count(),
+            },
+        }
+    )
+    return _no_store(render(request, "offerwall/admin_respondents.html", context))
 
 
 @require_http_methods(["GET", "POST"])
@@ -1208,6 +1496,133 @@ def admin_portal_billing(request):
         }
     )
     return _no_store(render(request, "offerwall/admin_billing.html", context))
+
+
+@require_http_methods(["GET", "POST"])
+def admin_portal_postbacks(request):
+    account, denied = _admin_portal_or_response(request)
+    if denied:
+        return denied
+    if request.method == "POST":
+        action = str(request.POST.get("action") or "").strip().lower()
+        try:
+            with transaction.atomic():
+                delivery = (
+                    PostbackDelivery.objects.select_for_update()
+                    .select_related("publisher", "placement")
+                    .get(public_id=request.POST.get("delivery_id"))
+                )
+                if action != "retry":
+                    raise ValidationError("Unknown postback action.")
+                if delivery.status not in {
+                    PostbackDelivery.Status.FAILED,
+                    PostbackDelivery.Status.SKIPPED,
+                }:
+                    raise ValidationError(
+                        "Only failed or skipped postbacks can be manually retried."
+                    )
+                placement_ready = bool(
+                    delivery.placement_id
+                    and delivery.placement.postback_enabled
+                    and delivery.callback_url
+                )
+                publisher_ready = bool(
+                    not delivery.placement_id
+                    and delivery.publisher.postback_enabled
+                    and delivery.callback_url
+                )
+                if not delivery.publisher.is_active:
+                    raise ValidationError("Enable the supplier before retrying postbacks.")
+                if not (placement_ready or publisher_ready):
+                    raise ValidationError(
+                        "The placement or supplier postback configuration is disabled."
+                    )
+                delivery.status = PostbackDelivery.Status.PENDING
+                delivery.next_attempt_at = None
+                delivery.save(
+                    update_fields=["status", "next_attempt_at", "updated_at"]
+                )
+                from .tasks import deliver_postback_task
+
+                transaction.on_commit(lambda: deliver_postback_task.delay(delivery.pk))
+            messages.success(request, "Postback queued for a controlled retry.")
+        except PostbackDelivery.DoesNotExist:
+            messages.error(request, "Postback delivery could not be found.")
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+        return _no_store(HttpResponseRedirect(reverse("offerwall:admin-postbacks")))
+
+    deliveries = PostbackDelivery.objects.select_related(
+        "publisher", "placement", "click", "click__survey"
+    )
+    query = str(request.GET.get("q") or "").strip()[:160]
+    publisher_id = str(request.GET.get("publisher") or "").strip()
+    status = str(request.GET.get("status") or "all").strip().lower()
+    event_type = str(request.GET.get("event") or "all").strip().lower()
+    if query:
+        search_filter = (
+            Q(click__external_user_id__icontains=query)
+            | Q(click__survey__local_id__icontains=query)
+            | Q(click__survey__name__icontains=query)
+            | Q(publisher__name__icontains=query)
+        )
+        try:
+            search_filter |= Q(public_id=uuid.UUID(query))
+        except (TypeError, ValueError):
+            pass
+        deliveries = deliveries.filter(search_filter)
+    if publisher_id:
+        try:
+            deliveries = deliveries.filter(publisher__public_id=uuid.UUID(publisher_id))
+        except (TypeError, ValueError):
+            publisher_id = ""
+    if status in {value for value, _ in PostbackDelivery.Status.choices}:
+        deliveries = deliveries.filter(status=status)
+    else:
+        status = "all"
+    available_events = list(
+        PostbackDelivery.objects.exclude(event_type="")
+        .values_list("event_type", flat=True)
+        .distinct()
+        .order_by("event_type")
+    )
+    if event_type in available_events:
+        deliveries = deliveries.filter(event_type=event_type)
+    else:
+        event_type = "all"
+
+    all_deliveries = PostbackDelivery.objects.all()
+    total = all_deliveries.count()
+    delivered = all_deliveries.filter(status=PostbackDelivery.Status.DELIVERED).count()
+    context = _admin_base_context(account, "postbacks")
+    context.update(
+        {
+            "page": Paginator(deliveries.distinct().order_by("-created_at"), 35).get_page(
+                request.GET.get("page")
+            ),
+            "filters": {
+                "q": query,
+                "publisher": publisher_id,
+                "status": status,
+                "event": event_type,
+            },
+            "publishers": Publisher.objects.order_by("name"),
+            "status_choices": PostbackDelivery.Status.choices,
+            "event_choices": available_events,
+            "postback_stats": {
+                "total": total,
+                "delivered": delivered,
+                "failed": all_deliveries.filter(
+                    status=PostbackDelivery.Status.FAILED
+                ).count(),
+                "pending": all_deliveries.filter(
+                    status=PostbackDelivery.Status.PENDING
+                ).count(),
+                "delivery_rate": _admin_percentage(delivered, total),
+            },
+        }
+    )
+    return _no_store(render(request, "offerwall/admin_postbacks.html", context))
 
 
 @require_GET

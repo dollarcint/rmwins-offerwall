@@ -1,0 +1,41 @@
+{% extends 'offerwall/admin_base.html' %}
+{% block title %}Respondents · RM Wins Admin{% endblock %}
+{% block page_name %}Respondents{% endblock %}
+{% block content %}
+<section class="rmw-admin-page-heading">
+  <div><p class="rmw-admin-kicker">Audience safety</p><h1>Respondent directory</h1><p>Trace verified identities across suppliers and stop abusive accounts without deleting audit history.</p></div>
+</section>
+
+<section class="rmw-admin-stat-grid rmw-admin-stat-grid-compact">
+  <article class="accent"><span>Total respondents</span><strong>{{ respondent_stats.total }}</strong><small>supplier-scoped identities</small></article>
+  <article><span>Verified</span><strong>{{ respondent_stats.verified }}</strong><small>email-confirmed accounts</small></article>
+  <article><span>Awaiting verification</span><strong>{{ respondent_stats.unverified }}</strong><small>not eligible for inventory</small></article>
+  <article><span>Banned</span><strong>{{ respondent_stats.banned }}</strong><small>blocked from new sessions</small></article>
+</section>
+
+<section class="rmw-admin-card rmw-admin-filter-card">
+  <form method="get" class="rmw-admin-filter-grid">
+    <label class="wide"><span>Find respondent</span><input type="search" name="q" value="{{ filters.q }}" placeholder="Exact email or respondent ID"></label>
+    <label><span>Supplier</span><select name="publisher"><option value="">All suppliers</option>{% for item in publishers %}<option value="{{ item.public_id }}" {% if filters.publisher == item.public_id|stringformat:'s' %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
+    <label><span>Status</span><select name="status"><option value="all">All respondents</option><option value="verified" {% if filters.status == 'verified' %}selected{% endif %}>Verified</option><option value="unverified" {% if filters.status == 'unverified' %}selected{% endif %}>Unverified</option><option value="banned" {% if filters.status == 'banned' %}selected{% endif %}>Banned</option></select></label>
+    <button type="submit">Apply</button><a href="{% url 'offerwall:admin-respondents' %}">Reset</a>
+  </form>
+</section>
+
+<section class="rmw-admin-card rmw-admin-table-card">
+  <div class="rmw-admin-card-head"><div><span>Identity registry</span><h2>{{ page.paginator.count }} respondents</h2></div><small>PII is encrypted at rest</small></div>
+  <div class="rmw-admin-table-wrap"><table class="rmw-admin-operations-table"><thead><tr><th>Respondent</th><th>Profile</th><th>Supplier</th><th>Placement</th><th>Joined / active</th><th>Performance</th><th>Status</th><th>Control</th></tr></thead><tbody>
+    {% for respondent in page.object_list %}<tr>
+      <td><strong>{{ respondent.full_name|default:'Name unavailable' }}</strong><small>{{ respondent.email|default:'Email unavailable' }}</small><code>{{ respondent.external_user_id }}</code></td>
+      <td><strong>{{ respondent.age }} years</strong><small>{{ respondent.get_gender_display }}</small></td>
+      <td><strong>{{ respondent.publisher.name }}</strong><small>#{{ respondent.publisher.publisher_code }}</small></td>
+      <td><strong>{{ respondent.last_placement.website_name|default:'Direct wall' }}</strong><small>{{ respondent.last_placement.app_id|default:'No placement' }}</small></td>
+      <td><strong>{{ respondent.joined_at|date:'d M Y' }}</strong><small>Last seen {{ respondent.last_activity_at|default:respondent.last_seen_at|timesince }} ago</small></td>
+      <td><strong>{{ respondent.visit_count }} / {{ respondent.click_count }}</strong><small>visits / clicks · {{ respondent.completed_count }} completes</small></td>
+      <td>{% if respondent.is_banned %}<span class="rmw-admin-status rejected">Banned</span><small>{{ respondent.ban_reason|default:'No reason recorded' }}</small>{% elif respondent.is_email_verified %}<span class="rmw-admin-status active">Verified</span><small>{{ respondent.email_verified_at|date:'d M Y, H:i' }}</small>{% else %}<span class="rmw-admin-status pending">Unverified</span>{% endif %}</td>
+      <td><div class="rmw-admin-lifecycle-actions">{% if respondent.is_banned %}<form method="post">{% csrf_token %}<input type="hidden" name="respondent_id" value="{{ respondent.public_id }}"><input type="hidden" name="action" value="unban"><button type="submit" class="approve">Unban</button></form>{% else %}<form method="post" onsubmit="return confirm('Ban this respondent from new survey sessions?');">{% csrf_token %}<input type="hidden" name="respondent_id" value="{{ respondent.public_id }}"><input type="hidden" name="action" value="ban"><input type="text" name="reason" maxlength="255" placeholder="Reason"><button type="submit" class="reject">Ban</button></form>{% endif %}</div></td>
+    </tr>{% empty %}<tr><td colspan="8">No respondents match these filters.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <nav class="rmw-admin-pagination">{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&amp;q={{ filters.q|urlencode }}&amp;publisher={{ filters.publisher }}&amp;status={{ filters.status }}">← Previous</a>{% else %}<span></span>{% endif %}<strong>{{ page.number }} / {{ page.paginator.num_pages }}</strong>{% if page.has_next %}<a href="?page={{ page.next_page_number }}&amp;q={{ filters.q|urlencode }}&amp;publisher={{ filters.publisher }}&amp;status={{ filters.status }}">Next →</a>{% else %}<span></span>{% endif %}</nav>
+</section>
+{% endblock %}
