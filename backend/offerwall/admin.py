@@ -15,6 +15,7 @@ from .models import (
     OfferOverride,
     OfferwallInventoryRule,
     OfferwallAdminPortalAccount,
+    PlacementOfferOverride,
     PlacementEventPostback,
     PostbackDelivery,
     Publisher,
@@ -344,6 +345,19 @@ class OfferOverrideAdmin(admin.ModelAdmin):
     list_filter = ["publisher", "is_excluded", "featured"]
     search_fields = ["publisher__name", "publisher__slug", "survey__local_id", "survey__name"]
     autocomplete_fields = ["publisher", "survey"]
+
+
+@admin.register(PlacementOfferOverride)
+class PlacementOfferOverrideAdmin(admin.ModelAdmin):
+    list_display = ["placement", "survey", "is_excluded", "updated_at"]
+    list_filter = ["placement__publisher", "is_excluded"]
+    search_fields = [
+        "placement__name",
+        "placement__website_name",
+        "survey__local_id",
+        "survey__name",
+    ]
+    autocomplete_fields = ["placement", "survey"]
 
 
 @admin.register(WallVisit)

@@ -21,6 +21,7 @@ from .models import (
     OfferOverride,
     OfferwallAdminPortalAccount,
     OfferwallInventoryRule,
+    PlacementOfferOverride,
     PlacementEventPostback,
     PostbackDelivery,
     Publisher,
@@ -927,6 +928,68 @@ class OfferwallFlowTests(TestCase):
         )
         self.assertEqual(offer_catalog(self.publisher, visit), [])
 
+        self.client.post(
+            reverse("offerwall:admin-inventory"),
+            {
+                "action": "bulk-assign",
+                "survey_ids": [self.survey.pk, second_survey.pk],
+                "supplier": self.publisher.public_id,
+            },
+        )
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Scoped allocation wall",
+            website_name="Scoped Allocation",
+            website_url="https://scoped-allocation.example.test",
+            allowed_country_codes=["US"],
+            allowed_device_types=["Desktop"],
+        )
+        placement_excluded = self.client.post(
+            reverse("offerwall:admin-inventory"),
+            {
+                "action": "bulk-exclude",
+                "survey_ids": [self.survey.pk],
+                "supplier": self.publisher.public_id,
+                "placement": placement.public_id,
+            },
+        )
+        self.assertEqual(placement_excluded.status_code, 302)
+        self.assertTrue(
+            PlacementOfferOverride.objects.get(
+                placement=placement,
+                survey=self.survey,
+            ).is_excluded
+        )
+        scoped_visit = create_wall_visit(
+            self.publisher,
+            external_user_id="scoped-allocation-user",
+            nonce="scoped_allocation_nonce_123",
+            entry_timestamp=timezone.now(),
+            placement=placement,
+        )
+        scoped_visit.country_code = "US"
+        scoped_visit.device = "Desktop"
+        scoped_visit.save(update_fields=["country_code", "device"])
+        scoped_catalog = offer_catalog(self.publisher, scoped_visit)
+        self.assertEqual([item["id"] for item in scoped_catalog], [second_survey.local_id])
+        scoped_visit.device = "Mobile"
+        scoped_visit.save(update_fields=["device"])
+        self.assertEqual(offer_catalog(self.publisher, scoped_visit), [])
+        scoped_visit.device = "Desktop"
+        scoped_visit.country_code = "IN"
+        scoped_visit.save(update_fields=["device", "country_code"])
+        self.assertEqual(offer_catalog(self.publisher, scoped_visit), [])
+
+        scoped_page = self.client.get(
+            reverse("offerwall:admin-inventory"),
+            {
+                "supplier": self.publisher.public_id,
+                "placement": placement.public_id,
+            },
+        )
+        self.assertContains(scoped_page, "Editing placement allocation")
+        self.assertContains(scoped_page, placement.app_id)
+
     def test_new_admin_controls_supplier_lifecycle(self):
         admin_user = self._open_admin_session(suffix="supplier-lifecycle")
         supplier_user = get_user_model().objects.create_user(
@@ -1119,6 +1182,8 @@ class OfferwallFlowTests(TestCase):
                 "form_type": "general",
                 "traffic_type": PublisherPlacement.TrafficType.BOTH,
                 "allowed_domains": "rewards.example.test\n*.partner.example.test",
+                "allowed_country_codes": "US, IN",
+                "allowed_device_types": ["Desktop", "Mobile"],
             },
         )
         self.assertEqual(domains_saved.status_code, 302)
@@ -1138,6 +1203,8 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(placement.currency_name, "Coins")
         self.assertEqual(placement.user_revenue_share, Decimal("80.00"))
         self.assertIn("*.partner.example.test", placement.allowed_domain_list)
+        self.assertEqual(placement.allowed_country_codes, ["US", "IN"])
+        self.assertEqual(placement.allowed_device_types, ["Desktop", "Mobile"])
         self.assertTrue(placement.postback_enabled)
         self.assertIn("{SID}", placement.postback_url)
 

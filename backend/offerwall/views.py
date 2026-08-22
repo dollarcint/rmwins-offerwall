@@ -73,6 +73,7 @@ from .models import (
     OfferOverride,
     OfferwallInventoryRule,
     OfferwallAdminPortalAccount,
+    PlacementOfferOverride,
     PlacementEventPostback,
     PostbackDelivery,
     Publisher,
@@ -747,6 +748,7 @@ def admin_portal_inventory(request):
     if request.method == "POST":
         action = str(request.POST.get("action") or "").strip().lower()
         supplier_id = str(request.POST.get("supplier") or "").strip()
+        placement_id = str(request.POST.get("placement") or "").strip()
         return_filters = {
             key: str(request.POST.get(key) or "").strip()
             for key in (
@@ -757,6 +759,7 @@ def admin_portal_inventory(request):
                 "status",
                 "offerwall",
                 "supplier",
+                "placement",
                 "page",
             )
         }
@@ -810,11 +813,20 @@ def admin_portal_inventory(request):
                     messages.error(request, exc.messages[0])
                     return redirect_to_inventory()
             publisher = None
+            selected_placement = None
             if action in {"bulk-assign", "bulk-exclude"}:
                 publisher = Publisher.objects.filter(public_id=supplier_id).first()
                 if publisher is None:
                     messages.error(request, "Select a supplier before changing allocations.")
                     return redirect_to_inventory()
+                if placement_id:
+                    selected_placement = PublisherPlacement.objects.filter(
+                        public_id=placement_id,
+                        publisher=publisher,
+                    ).first()
+                    if selected_placement is None:
+                        messages.error(request, "The selected placement does not belong to this supplier.")
+                        return redirect_to_inventory()
             with transaction.atomic():
                 if action in {"bulk-enable", "bulk-pause", "bulk-set-cut"}:
                     for survey in selected_surveys:
@@ -831,10 +843,16 @@ def admin_portal_inventory(request):
                 else:
                     excluded = action == "bulk-exclude"
                     for survey in selected_surveys:
-                        override, _ = OfferOverride.objects.get_or_create(
-                            publisher=publisher,
-                            survey=survey,
-                        )
+                        if selected_placement:
+                            override, _ = PlacementOfferOverride.objects.get_or_create(
+                                placement=selected_placement,
+                                survey=survey,
+                            )
+                        else:
+                            override, _ = OfferOverride.objects.get_or_create(
+                                publisher=publisher,
+                                survey=survey,
+                            )
                         if override.is_excluded != excluded:
                             override.is_excluded = excluded
                             override.save(update_fields=["is_excluded", "updated_at"])
@@ -846,8 +864,16 @@ def admin_portal_inventory(request):
                     if bulk_cut is not None
                     else "reset to supplier defaults"
                 ),
-                "bulk-assign": f"assigned to {publisher.name}" if publisher else "assigned",
-                "bulk-exclude": f"excluded for {publisher.name}" if publisher else "excluded",
+                "bulk-assign": (
+                    f"assigned to {selected_placement.website_name}"
+                    if selected_placement
+                    else f"assigned to {publisher.name}" if publisher else "assigned"
+                ),
+                "bulk-exclude": (
+                    f"excluded for {selected_placement.website_name}"
+                    if selected_placement
+                    else f"excluded for {publisher.name}" if publisher else "excluded"
+                ),
             }
             messages.success(
                 request,
@@ -897,6 +923,13 @@ def admin_portal_inventory(request):
                 )
         elif action == "save-supplier-rule":
             publisher = get_object_or_404(Publisher, public_id=supplier_id)
+            selected_placement = None
+            if placement_id:
+                selected_placement = get_object_or_404(
+                    PublisherPlacement,
+                    public_id=placement_id,
+                    publisher=publisher,
+                )
             raw_payout = str(request.POST.get("payout_percent_override") or "").strip()
             try:
                 payout_override = (
@@ -913,20 +946,30 @@ def admin_portal_inventory(request):
                     publisher=publisher,
                     survey=survey,
                 )
-                override.is_excluded = request.POST.get("allocation") == "excluded"
+                if not selected_placement:
+                    override.is_excluded = request.POST.get("allocation") == "excluded"
                 override.payout_percent_override = payout_override
                 override.featured = request.POST.get("featured") == "1"
-                override.save(
-                    update_fields=[
-                        "is_excluded",
-                        "payout_percent_override",
-                        "featured",
-                        "updated_at",
-                    ]
-                )
+                update_fields = ["payout_percent_override", "featured", "updated_at"]
+                if not selected_placement:
+                    update_fields.append("is_excluded")
+                override.save(update_fields=update_fields)
+                if selected_placement:
+                    placement_override, _ = PlacementOfferOverride.objects.get_or_create(
+                        placement=selected_placement,
+                        survey=survey,
+                    )
+                    placement_override.is_excluded = (
+                        request.POST.get("allocation") == "excluded"
+                    )
+                    placement_override.save(update_fields=["is_excluded", "updated_at"])
                 messages.success(
                     request,
-                    f"{publisher.name} allocation for survey {survey.local_id} was updated.",
+                    (
+                        f"{selected_placement.website_name} allocation for survey {survey.local_id} was updated."
+                        if selected_placement
+                        else f"{publisher.name} allocation for survey {survey.local_id} was updated."
+                    ),
                 )
         else:
             messages.error(request, "Unknown inventory action.")
@@ -940,11 +983,21 @@ def admin_portal_inventory(request):
     status = str(request.GET.get("status") or "").strip().lower()
     offerwall_state = str(request.GET.get("offerwall") or "").strip().lower()
     supplier_id = str(request.GET.get("supplier") or "").strip()
+    placement_id = str(request.GET.get("placement") or "").strip()
     selected_supplier = None
+    selected_placement = None
     if supplier_id:
         selected_supplier = Publisher.objects.filter(public_id=supplier_id).first()
         if selected_supplier is None:
             supplier_id = ""
+            placement_id = ""
+        elif placement_id:
+            selected_placement = PublisherPlacement.objects.filter(
+                public_id=placement_id,
+                publisher=selected_supplier,
+            ).first()
+            if selected_placement is None:
+                placement_id = ""
     if query:
         surveys = surveys.filter(
             Q(local_id__icontains=query)
@@ -977,6 +1030,7 @@ def admin_portal_inventory(request):
         for rule in OfferwallInventoryRule.objects.filter(survey_id__in=page_ids)
     }
     overrides = {}
+    placement_overrides = {}
     if selected_supplier:
         overrides = {
             override.survey_id: override
@@ -985,9 +1039,18 @@ def admin_portal_inventory(request):
                 survey_id__in=page_ids,
             )
         }
+        if selected_placement:
+            placement_overrides = {
+                override.survey_id: override
+                for override in PlacementOfferOverride.objects.filter(
+                    placement=selected_placement,
+                    survey_id__in=page_ids,
+                )
+            }
     for survey in page.object_list:
         rule = rules.get(survey.pk)
         override = overrides.get(survey.pk)
+        placement_override = placement_overrides.get(survey.pk)
         survey.offerwall_enabled = rule.is_enabled if rule else True
         survey.offerwall_admin_note = rule.admin_note if rule else ""
         survey.platform_cut_percent = rule.platform_cut_percent if rule else None
@@ -1005,6 +1068,11 @@ def admin_portal_inventory(request):
             else None
         )
         survey.supplier_override = override
+        survey.placement_override = placement_override
+        survey.allocation_override = (
+            placement_override if selected_placement else override
+        )
+        survey.supplier_level_excluded = bool(override and override.is_excluded)
         if selected_supplier:
             survey.effective_payout_percent = payout_percent_for(
                 selected_supplier,
@@ -1038,9 +1106,18 @@ def admin_portal_inventory(request):
                 "status": status,
                 "offerwall": offerwall_state,
                 "supplier": supplier_id,
+                "placement": placement_id,
             },
             "publishers": Publisher.objects.order_by("name"),
             "selected_supplier": selected_supplier,
+            "selected_placement": selected_placement,
+            "placements": (
+                selected_supplier.placements.exclude(
+                    status=PublisherPlacement.Status.ARCHIVED
+                ).order_by("website_name")
+                if selected_supplier
+                else PublisherPlacement.objects.none()
+            ),
             "countries": Survey.objects.exclude(country_code="").values_list("country_code", flat=True).distinct().order_by("country_code"),
             "providers": Survey.objects.exclude(company_name="").values_list("company_name", flat=True).distinct().order_by("company_name"),
             "inventory_sources": Survey.InventorySource.choices,

@@ -1,3 +1,4 @@
+import re
 from urllib.parse import urlsplit
 
 from django import forms
@@ -334,9 +335,31 @@ def _validate_brand_image(upload, *, max_bytes):
 
 
 class PlacementGeneralForm(forms.ModelForm):
+    DEVICE_CHOICES = (
+        ("Desktop", "Desktop"),
+        ("Mobile", "Mobile"),
+        ("Tablet", "Tablet"),
+    )
+    allowed_country_codes = forms.CharField(
+        required=False,
+        label="Allowed countries",
+        widget=forms.TextInput(attrs={"placeholder": "US, IN, GB"}),
+    )
+    allowed_device_types = forms.MultipleChoiceField(
+        required=False,
+        choices=DEVICE_CHOICES,
+        widget=forms.CheckboxSelectMultiple,
+        label="Allowed devices",
+    )
+
     class Meta:
         model = PublisherPlacement
-        fields = ["traffic_type", "allowed_domains"]
+        fields = [
+            "traffic_type",
+            "allowed_domains",
+            "allowed_country_codes",
+            "allowed_device_types",
+        ]
         widgets = {
             "traffic_type": forms.RadioSelect,
             "allowed_domains": forms.Textarea(
@@ -346,6 +369,28 @@ class PlacementGeneralForm(forms.ModelForm):
                 }
             ),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.is_bound and self.instance:
+            self.initial["allowed_country_codes"] = ", ".join(
+                self.instance.allowed_country_codes or []
+            )
+
+    def clean_allowed_country_codes(self):
+        raw_value = str(self.cleaned_data.get("allowed_country_codes") or "")
+        values = []
+        for item in re.split(r"[,\s]+", raw_value.upper()):
+            code = item.strip()
+            if not code:
+                continue
+            if len(code) != 2 or not code.isalpha():
+                raise ValidationError(f"Invalid ISO country code: {code}")
+            if code not in values:
+                values.append(code)
+        if len(values) > 100:
+            raise ValidationError("Add no more than 100 country codes.")
+        return values
 
     def clean_allowed_domains(self):
         value = str(self.cleaned_data.get("allowed_domains") or "")

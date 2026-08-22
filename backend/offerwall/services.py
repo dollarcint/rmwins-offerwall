@@ -196,6 +196,12 @@ def eligible_surveys(publisher: Publisher, visit: WallVisit):
         .exclude(offerwall_overrides__publisher=publisher, offerwall_overrides__is_excluded=True)
         .distinct()
     )
+    placement = visit.placement if visit.placement_id else None
+    if placement:
+        queryset = queryset.exclude(
+            offerwall_placement_overrides__placement=placement,
+            offerwall_placement_overrides__is_excluded=True,
+        )
     country_code = str(visit.country_code or "").strip().upper()
     if visit.pk and visit.placement_id and visit.respondent_id and not country_code:
         # A real iframe visit must never fall back to the unfiltered catalog.
@@ -204,12 +210,26 @@ def eligible_surveys(publisher: Publisher, visit: WallVisit):
         # market has been resolved from the entry IP.
         return queryset.none()
     if country_code:
+        allowed_countries = {
+            str(item).strip().upper()
+            for item in (placement.allowed_country_codes if placement else [])
+            if str(item).strip()
+        }
+        if allowed_countries and country_code not in allowed_countries:
+            return queryset.none()
         queryset = queryset.filter(
             Q(country_code__iexact=country_code)
             | Q(country_code="", country__iexact=country_code)
         )
     device = str(visit.device or "").strip()
     if device and device != "Unknown":
+        allowed_devices = {
+            str(item).strip().lower()
+            for item in (placement.allowed_device_types if placement else [])
+            if str(item).strip()
+        }
+        if allowed_devices and device.lower() not in allowed_devices:
+            return queryset.none()
         queryset = queryset.filter(
             Q(device_type="")
             | Q(device_type__icontains="all")

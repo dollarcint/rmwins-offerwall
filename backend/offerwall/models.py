@@ -313,6 +313,36 @@ class OfferOverride(models.Model):
         return f"{self.publisher.slug} · {self.survey.local_id}"
 
 
+class PlacementOfferOverride(models.Model):
+    """Placement-specific survey exclusion; missing rows inherit supplier eligibility."""
+
+    placement = models.ForeignKey(
+        "PublisherPlacement",
+        on_delete=models.CASCADE,
+        related_name="offer_overrides",
+    )
+    survey = models.ForeignKey(
+        "surveys.Survey",
+        on_delete=models.CASCADE,
+        related_name="offerwall_placement_overrides",
+    )
+    is_excluded = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["placement", "survey"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["placement", "survey"],
+                name="unique_placement_offer_override",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.placement.app_id} · {self.survey.local_id}"
+
+
 class OfferwallInventoryRule(models.Model):
     """Offerwall-only availability control that survives provider synchronisation."""
 
@@ -402,6 +432,16 @@ class PublisherPlacement(models.Model):
         max_length=12,
         choices=TrafficType.choices,
         default=TrafficType.INCENT,
+    )
+    allowed_country_codes = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Optional ISO alpha-2 country allowlist. Empty allows every survey market.",
+    )
+    allowed_device_types = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Optional placement device allowlist. Empty allows every detected device.",
     )
     postback_url = models.CharField(
         max_length=2000,

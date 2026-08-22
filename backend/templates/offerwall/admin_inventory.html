@@ -17,6 +17,7 @@
   <form method="get" class="rmw-admin-filter-grid rmw-admin-inventory-filters">
     <label class="wide"><span>Search inventory</span><input type="search" name="q" value="{{ filters.q }}" placeholder="Survey ID, name or provider"></label>
     <label><span>Supplier allocation</span><select name="supplier"><option value="">Global inventory only</option>{% for item in publishers %}<option value="{{ item.public_id }}" {% if filters.supplier == item.public_id|stringformat:'s' %}selected{% endif %}>{{ item.name }} · {{ item.publisher_code }}</option>{% endfor %}</select></label>
+    <label><span>Placement scope</span><select name="placement" {% if not selected_supplier %}disabled{% endif %}><option value="">All supplier placements</option>{% for item in placements %}<option value="{{ item.public_id }}" {% if filters.placement == item.public_id|stringformat:'s' %}selected{% endif %}>{{ item.website_name }} · {{ item.app_id }}</option>{% endfor %}</select></label>
     <label><span>Country</span><input type="search" name="country" value="{{ filters.country }}" list="inventory-countries" placeholder="All countries"><datalist id="inventory-countries">{% for item in countries %}<option value="{{ item }}">{% endfor %}</datalist></label>
     <label><span>Provider</span><input type="search" name="provider" value="{{ filters.provider }}" list="inventory-providers" placeholder="All providers"><datalist id="inventory-providers">{% for item in providers %}<option value="{{ item }}">{% endfor %}</datalist></label>
     <label><span>Inventory source</span><select name="source"><option value="">API &amp; manual</option>{% for value,label in inventory_sources %}<option value="{{ value }}" {% if filters.source == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
@@ -27,7 +28,7 @@
   </form>
 </section>
 
-{% if selected_supplier %}<section class="rmw-admin-selection-banner"><div><span>Editing supplier allocation</span><strong>{{ selected_supplier.name }}</strong></div><p>Publisher {{ selected_supplier.publisher_code }} · payout priority: supplier override → survey RM Wins cut → {{ selected_supplier.payout_percent }}% supplier default.</p></section>{% endif %}
+{% if selected_supplier %}<section class="rmw-admin-selection-banner"><div><span>{% if selected_placement %}Editing placement allocation{% else %}Editing supplier allocation{% endif %}</span><strong>{{ selected_supplier.name }}{% if selected_placement %} · {{ selected_placement.website_name }}{% endif %}</strong></div><p>{% if selected_placement %}Placement rules inherit supplier exclusions and economics. Country: {{ selected_placement.allowed_country_codes|join:', '|default:'All' }} · devices: {{ selected_placement.allowed_device_types|join:', '|default:'All' }} · traffic: {{ selected_placement.get_traffic_type_display }}.{% else %}Publisher {{ selected_supplier.publisher_code }} · payout priority: supplier override → survey RM Wins cut → {{ selected_supplier.payout_percent }}% supplier default.{% endif %}</p></section>{% endif %}
 
 <section class="rmw-admin-card rmw-admin-table-card">
   <div class="rmw-admin-card-head"><div><span>Survey catalog</span><h2>{{ page.paginator.count }} matching surveys</h2></div><small>Page {{ page.number }} of {{ page.paginator.num_pages }}</small></div>
@@ -60,7 +61,7 @@
       </form></td>
       {% if selected_supplier %}<td>
         <form method="post" class="rmw-admin-allocation-form">{% csrf_token %}{% include 'offerwall/_admin_inventory_filter_fields.html' %}<input type="hidden" name="action" value="save-supplier-rule"><input type="hidden" name="survey_id" value="{{ survey.pk }}">
-          <label><span>Allocation</span><select name="allocation"><option value="assigned" {% if not survey.supplier_override or not survey.supplier_override.is_excluded %}selected{% endif %}>Assigned</option><option value="excluded" {% if survey.supplier_override.is_excluded %}selected{% endif %}>Excluded</option></select></label>
+          <label><span>{% if selected_placement %}Placement{% else %}Allocation{% endif %}</span><select name="allocation"><option value="assigned" {% if not survey.allocation_override or not survey.allocation_override.is_excluded %}selected{% endif %}>Assigned</option><option value="excluded" {% if survey.allocation_override.is_excluded %}selected{% endif %}>Excluded</option></select>{% if selected_placement and survey.supplier_level_excluded %}<small>Supplier excluded</small>{% endif %}</label>
           <label><span>Payout %</span><input type="number" name="payout_percent_override" min="0" max="100" step="0.01" value="{% if survey.supplier_override and survey.supplier_override.payout_percent_override != None %}{{ survey.supplier_override.payout_percent_override }}{% endif %}" placeholder="{{ selected_supplier.payout_percent }}"></label>
           <label class="check"><input type="checkbox" name="featured" value="1" {% if survey.supplier_override.featured %}checked{% endif %}><span>Featured</span></label>
           <div class="rmw-admin-allocation-result"><small>Final supplier CPI</small><strong>{% if survey.effective_supplier_payout != None %}{{ selected_supplier.currency }} {{ survey.effective_supplier_payout|floatformat:2 }}{% else %}—{% endif %}</strong><span>{{ survey.effective_payout_percent }}% supplier · {{ survey.effective_platform_cut_percent }}% RM Wins · {{ survey.payout_rule_source }}</span></div>
@@ -70,9 +71,9 @@
     </tr>{% empty %}<tr><td colspan="{% if selected_supplier %}9{% else %}8{% endif %}">No surveys match these filters.</td></tr>{% endfor %}
   </tbody></table></div>
   <nav class="rmw-admin-pagination" aria-label="Inventory pages">
-    {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&amp;q={{ filters.q|urlencode }}&amp;country={{ filters.country|urlencode }}&amp;provider={{ filters.provider|urlencode }}&amp;source={{ filters.source }}&amp;status={{ filters.status|urlencode }}&amp;offerwall={{ filters.offerwall }}&amp;supplier={{ filters.supplier }}">← Previous</a>{% else %}<span></span>{% endif %}
+    {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&amp;q={{ filters.q|urlencode }}&amp;country={{ filters.country|urlencode }}&amp;provider={{ filters.provider|urlencode }}&amp;source={{ filters.source }}&amp;status={{ filters.status|urlencode }}&amp;offerwall={{ filters.offerwall }}&amp;supplier={{ filters.supplier }}&amp;placement={{ filters.placement }}">← Previous</a>{% else %}<span></span>{% endif %}
     <strong>{{ page.number }} / {{ page.paginator.num_pages }}</strong>
-    {% if page.has_next %}<a href="?page={{ page.next_page_number }}&amp;q={{ filters.q|urlencode }}&amp;country={{ filters.country|urlencode }}&amp;provider={{ filters.provider|urlencode }}&amp;source={{ filters.source }}&amp;status={{ filters.status|urlencode }}&amp;offerwall={{ filters.offerwall }}&amp;supplier={{ filters.supplier }}">Next →</a>{% else %}<span></span>{% endif %}
+    {% if page.has_next %}<a href="?page={{ page.next_page_number }}&amp;q={{ filters.q|urlencode }}&amp;country={{ filters.country|urlencode }}&amp;provider={{ filters.provider|urlencode }}&amp;source={{ filters.source }}&amp;status={{ filters.status|urlencode }}&amp;offerwall={{ filters.offerwall }}&amp;supplier={{ filters.supplier }}&amp;placement={{ filters.placement }}">Next →</a>{% else %}<span></span>{% endif %}
   </nav>
 </section>
 <script>

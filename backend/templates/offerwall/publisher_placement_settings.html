@@ -21,6 +21,8 @@
           <label><b># &nbsp; App Unique ID</b><input value="{{ placement.app_id }}" disabled><small>System-generated ID used for cross-platform identification.</small></label>
           <label><b>◎ &nbsp; Platform</b><input value="{{ placement.get_platform_display }}" disabled><small>The integrated platform for this placement.</small></label>
           <label class="wide"><b>◎ &nbsp; Project / Website URL</b><input value="{{ placement.website_url }}" disabled><small>This is established during creation and cannot be changed.</small></label>
+          <label><b>◉ &nbsp; Allowed Countries</b>{{ general_form.allowed_country_codes }}<small>Comma-separated ISO codes. Blank allows every matched market.</small>{{ general_form.allowed_country_codes.errors }}</label>
+          <label><b>▣ &nbsp; Allowed Devices</b>{{ general_form.allowed_device_types }}<small>Leave all unchecked to allow Desktop, Mobile and Tablet.</small>{{ general_form.allowed_device_types.errors }}</label>
           <label class="wide"><b>⌂ &nbsp; Additional Allowed iFrame Domains</b>{{ general_form.allowed_domains }}<small>The primary website is always allowed. Add one additional hostname per line; wildcard subdomains such as *.example.com are supported.</small>{{ general_form.allowed_domains.errors }}</label>
         </div>
         <fieldset class="ow-ou-traffic"><legend>ϟ &nbsp; Traffic Type</legend><div>
