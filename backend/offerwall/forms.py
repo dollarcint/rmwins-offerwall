@@ -4,10 +4,17 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.db import transaction
 
 from surveys.models import Survey
 
-from .models import PlacementEventPostback, Publisher, PublisherPlacement, RespondentProfile
+from .models import (
+    PlacementEventPostback,
+    Publisher,
+    PublisherPlacement,
+    PublisherPortalAccount,
+    RespondentProfile,
+)
 from .security import generate_signing_secret
 
 
@@ -427,6 +434,152 @@ class PlacementEventPostbackForm(forms.ModelForm):
             if duplicate.exists():
                 raise ValidationError("A postback already exists for this survey and event.")
         return cleaned
+
+
+class PublisherGeneralDetailsForm(forms.Form):
+    """Supplier-owned business profile fields; platform and payout controls stay admin-only."""
+
+    company_name = forms.CharField(
+        max_length=160,
+        widget=forms.TextInput(attrs={"autocomplete": "organization"}),
+    )
+    contact_name = forms.CharField(
+        max_length=160,
+        widget=forms.TextInput(attrs={"autocomplete": "name"}),
+    )
+    job_title = forms.CharField(
+        max_length=120,
+        required=False,
+        widget=forms.TextInput(attrs={"autocomplete": "organization-title"}),
+    )
+    business_email = forms.EmailField(
+        max_length=254,
+        label="Business email",
+        widget=forms.EmailInput(attrs={"autocomplete": "email"}),
+    )
+    phone = forms.CharField(
+        max_length=40,
+        required=False,
+        widget=forms.TextInput(attrs={"autocomplete": "tel"}),
+    )
+    website = forms.URLField(
+        max_length=500,
+        required=False,
+        widget=forms.URLInput(
+            attrs={"autocomplete": "url", "placeholder": "https://company.com"}
+        ),
+    )
+    country = forms.CharField(
+        max_length=80,
+        widget=forms.TextInput(attrs={"autocomplete": "country-name"}),
+    )
+    state = forms.CharField(
+        max_length=100,
+        required=False,
+        widget=forms.TextInput(attrs={"autocomplete": "address-level1"}),
+    )
+    city = forms.CharField(
+        max_length=100,
+        required=False,
+        widget=forms.TextInput(attrs={"autocomplete": "address-level2"}),
+    )
+    postal_code = forms.CharField(
+        max_length=24,
+        required=False,
+        widget=forms.TextInput(attrs={"autocomplete": "postal-code"}),
+    )
+    address_line = forms.CharField(
+        max_length=255,
+        required=False,
+        label="Street address",
+        widget=forms.TextInput(attrs={"autocomplete": "street-address"}),
+    )
+
+    def __init__(self, *args, account: PublisherPortalAccount, **kwargs):
+        self.account = account
+        if not args and "data" not in kwargs and "initial" not in kwargs:
+            kwargs["initial"] = {
+                "company_name": account.publisher.name,
+                "contact_name": account.contact_name,
+                "job_title": account.job_title,
+                "business_email": account.business_email,
+                "phone": account.phone,
+                "website": account.website,
+                "country": account.country,
+                "state": account.state,
+                "city": account.city,
+                "postal_code": account.postal_code,
+                "address_line": account.address_line,
+            }
+        super().__init__(*args, **kwargs)
+
+    def clean_business_email(self):
+        user_model = get_user_model()
+        value = user_model.objects.normalize_email(
+            self.cleaned_data["business_email"]
+        ).lower()
+        account_duplicate = PublisherPortalAccount.objects.filter(
+            business_email__iexact=value
+        ).exclude(pk=self.account.pk)
+        user_duplicate = user_model.objects.filter(email__iexact=value).exclude(
+            pk=self.account.user_id
+        )
+        if account_duplicate.exists() or user_duplicate.exists():
+            raise ValidationError("This business email belongs to another account.")
+        return value
+
+    def clean_company_name(self):
+        value = str(self.cleaned_data["company_name"] or "").strip()
+        if len(value) < 2:
+            raise ValidationError("Enter a valid company name.")
+        return value
+
+    def save(self):
+        if not self.is_valid():
+            raise ValueError("Cannot save invalid general details.")
+        with transaction.atomic():
+            account = (
+                PublisherPortalAccount.objects.select_for_update()
+                .select_related("publisher", "user")
+                .get(pk=self.account.pk)
+            )
+            account.publisher.name = self.cleaned_data["company_name"]
+            account.publisher.save(update_fields=["name", "updated_at"])
+
+            for field in (
+                "contact_name",
+                "job_title",
+                "business_email",
+                "phone",
+                "website",
+                "country",
+                "state",
+                "city",
+                "postal_code",
+                "address_line",
+            ):
+                setattr(account, field, str(self.cleaned_data.get(field) or "").strip())
+            account.save(
+                update_fields=[
+                    "contact_name",
+                    "job_title",
+                    "business_email",
+                    "phone",
+                    "website",
+                    "country",
+                    "state",
+                    "city",
+                    "postal_code",
+                    "address_line",
+                    "updated_at",
+                ]
+            )
+
+            account.user.first_name = account.contact_name[:150]
+            account.user.email = account.business_email
+            account.user.save(update_fields=["first_name", "email"])
+            self.account = account
+            return account
 
 
 class RespondentOnboardingForm(forms.Form):

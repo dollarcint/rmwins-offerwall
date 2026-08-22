@@ -570,6 +570,86 @@ class OfferwallFlowTests(TestCase):
         session.save()
         return user
 
+    def test_supplier_can_view_and_update_general_details(self):
+        user = self._open_supplier_session(suffix="general")
+        account = PublisherPortalAccount.objects.get(user=user)
+        url = reverse("offerwall:publisher-general-details")
+
+        page = self.client.get(url)
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "Company information")
+        self.assertContains(page, f"#{self.publisher.publisher_code}")
+        self.assertContains(page, user.username)
+
+        response = self.client.post(
+            url,
+            {
+                "company_name": "Acme Audience Network",
+                "contact_name": "Maya Singh",
+                "job_title": "Partnerships Lead",
+                "business_email": "maya@acme-audience.example",
+                "phone": "+91 99999 22222",
+                "website": "https://acme-audience.example",
+                "country": "India",
+                "state": "Delhi",
+                "city": "New Delhi",
+                "postal_code": "110001",
+                "address_line": "12 Research Avenue",
+            },
+        )
+        self.assertRedirects(response, url, fetch_redirect_response=False)
+
+        account.refresh_from_db()
+        self.publisher.refresh_from_db()
+        user.refresh_from_db()
+        self.assertEqual(self.publisher.name, "Acme Audience Network")
+        self.assertEqual(account.contact_name, "Maya Singh")
+        self.assertEqual(account.job_title, "Partnerships Lead")
+        self.assertEqual(account.city, "New Delhi")
+        self.assertEqual(account.address_line, "12 Research Avenue")
+        self.assertEqual(user.email, "maya@acme-audience.example")
+        self.assertEqual(user.username, "supplier-general")
+
+    def test_general_details_rejects_another_accounts_email(self):
+        self._open_supplier_session(suffix="general-duplicate")
+        other_user = get_user_model().objects.create_user(
+            username="other-supplier",
+            email="owned@other.example",
+            password="Strong-Pass-893!",
+        )
+        other_publisher = Publisher.objects.create(
+            name="Other Supplier",
+            slug="other-supplier",
+            is_active=True,
+        )
+        PublisherPortalAccount.objects.create(
+            user=other_user,
+            publisher=other_publisher,
+            contact_name="Other Owner",
+            business_email="owned@other.example",
+            country="India",
+            status=PublisherPortalAccount.Status.APPROVED,
+        )
+
+        response = self.client.post(
+            reverse("offerwall:publisher-general-details"),
+            {
+                "company_name": self.publisher.name,
+                "contact_name": "Supplier Owner",
+                "business_email": "owned@other.example",
+                "phone": "+91 90000 33333",
+                "website": "",
+                "country": "India",
+                "state": "",
+                "city": "",
+                "postal_code": "",
+                "address_line": "",
+                "job_title": "",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "belongs to another account")
+
     def test_supplier_can_create_placement_and_copy_iframe(self):
         self._open_supplier_session(suffix="placement")
         response = self.client.post(

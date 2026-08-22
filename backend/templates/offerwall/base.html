@@ -23,7 +23,7 @@
         <a class="{% if supplier_active_page == 'placements' %}active{% endif %}" href="{% url 'offerwall:publisher-placements' %}"><span aria-hidden="true">▣</span>Placements</a>
         <a class="{% if supplier_active_page == 'respondents' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'respondents' %}"><span aria-hidden="true">◎</span>Respondents</a>
         <a class="{% if supplier_active_page == 'survey-results' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'survey-results' %}"><span aria-hidden="true">✓</span>Survey results</a>
-        <a class="{% if supplier_active_page == 'general-details' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'general-details' %}"><span aria-hidden="true">◫</span>General details</a>
+        <a class="{% if supplier_active_page == 'general-details' %}active{% endif %}" href="{% url 'offerwall:publisher-general-details' %}"><span aria-hidden="true">◫</span>General details</a>
         <a class="{% if supplier_active_page == 'reports' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'reports' %}"><span aria-hidden="true">⌁</span>Reports</a>
         <a href="{% url 'offerwall:publisher-dashboard' %}#cashout"><span aria-hidden="true">₹</span>Cashout</a>
       </nav>

@@ -60,6 +60,11 @@ urlpatterns = [
         name="publisher-placement-postback-test",
     ),
     path(
+        "publisher/sections/general-details/",
+        views.publisher_general_details,
+        name="publisher-general-details",
+    ),
+    path(
         "publisher/sections/<slug:section>/",
         views.publisher_section,
         name="publisher-section",

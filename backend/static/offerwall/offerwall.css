@@ -2643,6 +2643,308 @@ a {
   }
 }
 
+/* Supplier general details */
+.ow-general-details-page {
+  max-width: 1320px;
+}
+
+.ow-general-heading {
+  align-items: flex-end;
+}
+
+.ow-account-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 13px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+
+.ow-account-state::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
+.ow-account-state.approved {
+  color: #08765f;
+  background: #e9f8f3;
+  border: 1px solid #c6ecdf;
+}
+
+.ow-general-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.ow-profile-summary,
+.ow-general-card,
+.ow-general-actions {
+  border: 1px solid #dce6ee;
+  background: #fff;
+  box-shadow: 0 14px 38px rgba(27, 52, 77, .06);
+}
+
+.ow-profile-summary {
+  position: sticky;
+  top: 24px;
+  padding: 28px;
+  border-radius: 20px;
+}
+
+.ow-profile-monogram {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 18px;
+  border-radius: 17px;
+  color: #fff;
+  background: linear-gradient(145deg, #173f70, #1b91a2);
+  box-shadow: 0 12px 28px rgba(20, 75, 116, .2);
+  font-size: 23px;
+  font-weight: 850;
+}
+
+.ow-profile-summary h2 {
+  margin: 0 0 6px;
+  color: #17304d;
+  font-size: 20px;
+}
+
+.ow-profile-summary > p {
+  margin: 0;
+  color: #718197;
+  overflow-wrap: anywhere;
+}
+
+.ow-profile-summary dl {
+  display: grid;
+  gap: 0;
+  margin: 25px 0 0;
+}
+
+.ow-profile-summary dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  border-top: 1px solid #edf2f6;
+}
+
+.ow-profile-summary dt {
+  color: #7c8b9e;
+  font-size: 12px;
+}
+
+.ow-profile-summary dd {
+  margin: 0;
+  color: #1d3956;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.ow-profile-lock-note {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 14px;
+  background: #f2f7fa;
+}
+
+.ow-profile-lock-note strong {
+  display: block;
+  color: #1c526a;
+  font-size: 12px;
+}
+
+.ow-profile-lock-note p {
+  margin: 6px 0 0;
+  color: #6b7e90;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.ow-general-form {
+  display: grid;
+  gap: 18px;
+}
+
+.ow-general-card {
+  padding: 26px;
+  border-radius: 20px;
+}
+
+.ow-general-card > header {
+  display: flex;
+  gap: 13px;
+  align-items: flex-start;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #e8eef3;
+}
+
+.ow-general-card > header > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 10px;
+  color: #176d7f;
+  background: #e7f5f7;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.ow-general-card h2 {
+  margin: 0;
+  color: #183451;
+  font-size: 17px;
+}
+
+.ow-general-card header p {
+  margin: 5px 0 0;
+  color: #7b8999;
+  font-size: 12px;
+}
+
+.ow-general-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding-top: 22px;
+}
+
+.ow-general-grid label {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  color: #40566e;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.ow-general-grid label.wide {
+  grid-column: 1 / -1;
+}
+
+.ow-general-grid label > span b {
+  color: #df6255;
+}
+
+.ow-general-grid input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 14px;
+  border: 1px solid #ccd9e4;
+  border-radius: 11px;
+  outline: none;
+  color: #183451;
+  background: #fbfdfe;
+  font: inherit;
+  font-weight: 550;
+  transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+
+.ow-general-grid input:focus {
+  border-color: #2b8fa0;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(43, 143, 160, .1);
+}
+
+.ow-general-grid .errorlist,
+.ow-form-wide-error .errorlist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: #b53f3b;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.ow-form-wide-error {
+  padding: 13px 16px;
+  border: 1px solid #efc2c0;
+  border-radius: 12px;
+  background: #fff2f1;
+}
+
+.ow-general-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 24px;
+  border-radius: 18px;
+}
+
+.ow-general-actions p {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.ow-general-actions p strong {
+  color: #23405d;
+  font-size: 12px;
+}
+
+.ow-general-actions p span {
+  color: #7c8a99;
+  font-size: 11px;
+}
+
+.ow-general-actions button {
+  min-height: 46px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  background: linear-gradient(135deg, #173f70, #187f91);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  box-shadow: 0 12px 25px rgba(23, 63, 112, .18);
+}
+
+.ow-general-actions button span {
+  margin-left: 8px;
+}
+
+@media (max-width: 980px) {
+  .ow-general-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .ow-profile-summary {
+    position: static;
+  }
+}
+
+@media (max-width: 640px) {
+  .ow-general-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ow-general-grid label.wide {
+    grid-column: auto;
+  }
+
+  .ow-general-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 /* OpinionUniverse-style Apps / Placements workflow */
 .ow-apps-page {
   width: min(1440px, 100%);

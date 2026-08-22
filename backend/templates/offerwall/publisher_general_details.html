@@ -1,0 +1,71 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}General details · {{ portal_publisher.name }}{% endblock %}
+{% block content %}
+<section class="ow-portal-page ow-general-details-page">
+  <header class="ow-page-heading ow-general-heading">
+    <div>
+      <span class="ow-eyebrow"><i></i> Account settings</span>
+      <h1>General details</h1>
+      <p>Keep your company, primary contact and business location accurate.</p>
+    </div>
+    <span class="ow-account-state approved">{{ supplier_account.get_status_display }}</span>
+  </header>
+
+  <div class="ow-general-layout">
+    <aside class="ow-profile-summary">
+      <div class="ow-profile-monogram">{{ portal_publisher.name|slice:':1'|upper }}</div>
+      <h2>{{ portal_publisher.name }}</h2>
+      <p>{{ supplier_account.business_email }}</p>
+      <dl>
+        <div><dt>Publisher ID</dt><dd>#{{ portal_publisher.publisher_code }}</dd></div>
+        <div><dt>Username</dt><dd>{{ supplier_account.user.username }}</dd></div>
+        <div><dt>Base currency</dt><dd>{{ portal_publisher.currency }}</dd></div>
+        <div><dt>Member since</dt><dd>{{ supplier_account.created_at|date:'d M Y' }}</dd></div>
+      </dl>
+      <div class="ow-profile-lock-note">
+        <strong>Platform-managed details</strong>
+        <p>Publisher ID, username, approval and payout settings can only be changed by RM Wins administrators.</p>
+      </div>
+    </aside>
+
+    <form method="post" class="ow-general-form" novalidate>
+      {% csrf_token %}
+      {% if general_details_form.non_field_errors %}<div class="ow-form-wide-error">{{ general_details_form.non_field_errors }}</div>{% endif %}
+
+      <section class="ow-general-card">
+        <header><span>01</span><div><h2>Company information</h2><p>Your public supplier identity and primary website.</p></div></header>
+        <div class="ow-general-grid">
+          <label class="wide"><span>Company name <b>*</b></span>{{ general_details_form.company_name }}{{ general_details_form.company_name.errors }}</label>
+          <label class="wide"><span>Company website</span>{{ general_details_form.website }}{{ general_details_form.website.errors }}</label>
+        </div>
+      </section>
+
+      <section class="ow-general-card">
+        <header><span>02</span><div><h2>Primary contact</h2><p>The person RM Wins should contact about this account.</p></div></header>
+        <div class="ow-general-grid">
+          <label><span>Contact name <b>*</b></span>{{ general_details_form.contact_name }}{{ general_details_form.contact_name.errors }}</label>
+          <label><span>Job title</span>{{ general_details_form.job_title }}{{ general_details_form.job_title.errors }}</label>
+          <label><span>Business email <b>*</b></span>{{ general_details_form.business_email }}{{ general_details_form.business_email.errors }}</label>
+          <label><span>Phone number</span>{{ general_details_form.phone }}{{ general_details_form.phone.errors }}</label>
+        </div>
+      </section>
+
+      <section class="ow-general-card">
+        <header><span>03</span><div><h2>Business location</h2><p>Used for compliance, account review and payment records.</p></div></header>
+        <div class="ow-general-grid">
+          <label><span>Country <b>*</b></span>{{ general_details_form.country }}{{ general_details_form.country.errors }}</label>
+          <label><span>State / province</span>{{ general_details_form.state }}{{ general_details_form.state.errors }}</label>
+          <label><span>City</span>{{ general_details_form.city }}{{ general_details_form.city.errors }}</label>
+          <label><span>Postal code</span>{{ general_details_form.postal_code }}{{ general_details_form.postal_code.errors }}</label>
+          <label class="wide"><span>Street address</span>{{ general_details_form.address_line }}{{ general_details_form.address_line.errors }}</label>
+        </div>
+      </section>
+
+      <footer class="ow-general-actions">
+        <p><strong>Secure update</strong><span>Your login username and payout configuration will not change.</span></p>
+        <button type="submit">Save general details <span>→</span></button>
+      </footer>
+    </form>
+  </div>
+</section>
+{% endblock %}

@@ -177,6 +177,11 @@ class PublisherPortalAccount(models.Model):
     phone = models.CharField(max_length=40, blank=True)
     website = models.URLField(max_length=500, blank=True)
     country = models.CharField(max_length=80)
+    job_title = models.CharField(max_length=120, blank=True)
+    address_line = models.CharField(max_length=255, blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    state = models.CharField(max_length=100, blank=True)
+    postal_code = models.CharField(max_length=24, blank=True)
     status = models.CharField(
         max_length=12,
         choices=Status.choices,

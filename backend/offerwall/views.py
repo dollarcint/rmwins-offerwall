@@ -55,6 +55,7 @@ from .forms import (
     PlacementEventPostbackForm,
     PlacementGeneralForm,
     PlacementPostbackForm,
+    PublisherGeneralDetailsForm,
     PublisherPlacementCreateForm,
     RespondentOnboardingForm,
     RespondentVerificationForm,
@@ -1879,6 +1880,44 @@ def publisher_section(request, section):
     context = _supplier_portal_context(publisher, section)
     context.update({"section_title": title, "section_description": description})
     return _no_store(render(request, "offerwall/publisher_placeholder.html", context))
+
+
+@require_http_methods(["GET", "POST"])
+def publisher_general_details(request):
+    publisher, denied = _publisher_portal_or_response(request)
+    if denied:
+        return denied
+    account = _supplier_account(request)
+    if not account or account.publisher_id != publisher.pk:
+        return _error(
+            request,
+            "Supplier account unavailable",
+            "Sign in again to update your company profile.",
+            status=403,
+        )
+
+    form = (
+        PublisherGeneralDetailsForm(request.POST, account=account)
+        if request.method == "POST"
+        else PublisherGeneralDetailsForm(account=account)
+    )
+    if request.method == "POST" and form.is_valid():
+        account = form.save()
+        messages.success(request, "General details updated successfully.")
+        return _no_store(
+            HttpResponseRedirect(reverse("offerwall:publisher-general-details"))
+        )
+
+    context = _supplier_portal_context(publisher, "general-details")
+    context.update(
+        {
+            "supplier_account": account,
+            "general_details_form": form,
+        }
+    )
+    return _no_store(
+        render(request, "offerwall/publisher_general_details.html", context)
+    )
 
 
 @require_POST
