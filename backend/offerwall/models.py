@@ -592,6 +592,7 @@ class PlacementEventPostback(models.Model):
         TERMINATE = "terminate", "Terminated"
         OVER_QUOTA = "over_quota", "Over quota"
         QUALITY_TERMINATE = "quality_terminate", "Quality terminated"
+        SECURITY = "security", "Security terminated"
         REVERSAL = "reversal", "Reversal"
 
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)

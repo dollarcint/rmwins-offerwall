@@ -388,6 +388,53 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(reversal.amount, Decimal("3.50"))
         self.assertEqual(delivery.payload["amount"], "-3.50")
 
+    def test_terminal_outcomes_create_idempotent_status_specific_postbacks(self):
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Outcome callback wall",
+            website_name="Outcome callback site",
+            website_url="https://outcome-callback.example.test",
+            postback_enabled=True,
+            postback_url=(
+                "https://outcome-callback.example.test/postback"
+                "?sid={SID}&status={STATUS}&event={eventname}"
+            ),
+        )
+        cases = (
+            (SurveyAttempt.Status.TERMINATED, "terminate", "2"),
+            (SurveyAttempt.Status.OVER_QUOTA, "over_quota", "3"),
+            (SurveyAttempt.Status.QUALITY_TERMINATED, "security", "4"),
+        )
+        for index, (attempt_status, event_type, expected_status) in enumerate(cases):
+            visit = create_wall_visit(
+                self.publisher,
+                external_user_id=f"terminal-user-{index}",
+                nonce=f"terminal_outcome_nonce_{index}",
+                entry_timestamp=timezone.now(),
+                placement=placement,
+            )
+            click = self._click(visit=visit)
+            click.attempt.status = attempt_status
+            click.attempt.status_source = "innovatemr_redirect_hash"
+            click.attempt.is_verified = True
+            click.attempt.save(
+                update_fields=["status", "status_source", "is_verified", "updated_at"]
+            )
+            process_attempt_outcome(click.attempt_id)
+            process_attempt_outcome(click.attempt_id)
+            delivery = PostbackDelivery.objects.get(
+                click=click,
+                event_type=event_type,
+            )
+            self.assertEqual(delivery.payload["status"], expected_status)
+            self.assertEqual(delivery.payload["event"], event_type)
+            self.assertIn(f"status={expected_status}", delivery.callback_url)
+            self.assertIn(f"event={event_type}", delivery.callback_url)
+            self.assertEqual(
+                PostbackDelivery.objects.filter(click=click, event_type=event_type).count(),
+                1,
+            )
+
     def test_reward_hold_keeps_balance_pending_until_scheduler_release(self):
         self.publisher.reward_hold_hours = 24
         self.publisher.save(update_fields=["reward_hold_hours", "updated_at"])

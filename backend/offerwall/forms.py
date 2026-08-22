@@ -609,7 +609,13 @@ class PlacementDesignForm(forms.ModelForm):
 
 class PlacementEventPostbackForm(forms.ModelForm):
     event_type = forms.ChoiceField(
-        choices=(("complete", "Completed"), ("reversal", "Reversal")),
+        choices=(
+            (PlacementEventPostback.EventType.COMPLETE, "Completed"),
+            (PlacementEventPostback.EventType.TERMINATE, "Terminated"),
+            (PlacementEventPostback.EventType.OVER_QUOTA, "Over quota"),
+            (PlacementEventPostback.EventType.SECURITY, "Security terminated"),
+            (PlacementEventPostback.EventType.REVERSAL, "Reversal"),
+        ),
         label="Event",
     )
     survey_id = forms.CharField(

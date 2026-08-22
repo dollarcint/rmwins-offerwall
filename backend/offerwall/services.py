@@ -460,6 +460,14 @@ def _postback_payload(click, attempt, event_type, ledger_entry, *, credited):
     if placement:
         reward_amount = placement.display_reward(amount)
         reward_currency = placement.currency_name
+    event_status = {
+        PlacementEventPostback.EventType.COMPLETE: "1",
+        PlacementEventPostback.EventType.TERMINATE: "2",
+        PlacementEventPostback.EventType.OVER_QUOTA: "3",
+        PlacementEventPostback.EventType.QUALITY_TERMINATE: "4",
+        PlacementEventPostback.EventType.SECURITY: "4",
+        PlacementEventPostback.EventType.REVERSAL: "2",
+    }.get(event_type, "4")
     return {
         "event": event_type,
         "event_id": "",
@@ -468,7 +476,7 @@ def _postback_payload(click, attempt, event_type, ledger_entry, *, credited):
         "offer_id": click.survey.local_id,
         "click_id": str(click.public_id),
         "transaction_id": str(ledger_entry.public_id) if ledger_entry else "",
-        "status": "2" if event_type == "reversal" else "1",
+        "status": event_status,
         "status_label": attempt.get_status_display(),
         "term_reason": outcome.get("reason", ""),
         "term_category": outcome.get("category", ""),
@@ -536,16 +544,19 @@ def _create_postback(click, attempt, event_type, ledger_entry=None, *, credited=
     placement = click.visit.placement if click.visit_id else None
     specific_rule = None
     if placement:
-        specific_rule = (
-            PlacementEventPostback.objects.filter(
-                placement=placement,
-                event_type=event_type,
-                is_active=True,
-            )
+        specific_rules = (
+            PlacementEventPostback.objects.filter(placement=placement, is_active=True)
             .filter(Q(survey=click.survey) | Q(survey__isnull=True))
             .order_by("-survey_id", "-created_at")
-            .first()
         )
+        specific_rule = specific_rules.filter(event_type=event_type).first()
+        if (
+            specific_rule is None
+            and event_type == PlacementEventPostback.EventType.SECURITY
+        ):
+            specific_rule = specific_rules.filter(
+                event_type=PlacementEventPostback.EventType.QUALITY_TERMINATE
+            ).first()
     placement_template = (
         specific_rule.callback_url
         if specific_rule
@@ -1031,4 +1042,17 @@ def process_attempt_outcome(attempt_id: int):
                 credit.conversion = conversion
                 credit.save(update_fields=["conversion"])
             _reverse_conversion(conversion, attempt, credit)
+        outcome_event = {
+            SurveyAttempt.Status.TERMINATED: PlacementEventPostback.EventType.TERMINATE,
+            SurveyAttempt.Status.OVER_QUOTA: PlacementEventPostback.EventType.OVER_QUOTA,
+            SurveyAttempt.Status.QUALITY_TERMINATED: PlacementEventPostback.EventType.SECURITY,
+        }.get(attempt.status)
+        if outcome_event and authoritative:
+            _create_postback(
+                click,
+                attempt,
+                outcome_event,
+                None,
+                credited=False,
+            )
         return click
