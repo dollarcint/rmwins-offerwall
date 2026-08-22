@@ -37,12 +37,13 @@ class ConfigurableProviderClientTests(SimpleTestCase):
             client._headers()
 
     def test_biobrain_uses_exact_endpoint_header_and_normalizes_inventory(self):
-        session = CapturingSession({"status": "ok", "hasError": False, "Surveys": [{"SurveyId": 44, "Name": "Bio study", "Revenue": 2.5, "IncidentRate": 35, "LengthOfInterview": 12, "SurveyUrl": "https://respond.voqall.com/l?vq_sid=44", "Has_Quotas": True, "LastUpdatedOnUTC": "2026-08-09T10:00:00Z"}]})
+        session = CapturingSession({"status": "ok", "hasError": False, "Surveys": [{"SurveyId": 44, "Name": "Bio study", "Revenue": 2.5, "IncidentRate": 35, "LengthOfInterview": 12, "Completes": 120, "SurveyUrl": "https://respond.voqall.com/l?vq_sid=44", "Has_Quotas": True, "LastUpdatedOnUTC": "2026-08-09T10:00:00Z"}]})
         surveys = InnovateMRClient(token="secret", session=session, integration=integration()).get_allocated_surveys()
         self.assertEqual(session.calls[0][0], "https://partner-api.voqall.com/api/v1/surveys")
         self.assertEqual(session.calls[0][1]["headers"]["EQ-PARTNER-ACCESS-KEY"], "secret")
         self.assertNotIn("x-access-token", session.calls[0][1]["headers"])
         self.assertEqual((surveys[0]["surveyId"], surveys[0]["surveyName"], surveys[0]["CPI"]), (44, "Bio study", 2.5))
+        self.assertEqual(surveys[0]["remainingN"], surveys[0]["Completes"])
 
     def test_biobrain_resolves_language_id_to_country(self):
         session = CapturingSession(

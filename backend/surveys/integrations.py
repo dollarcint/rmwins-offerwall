@@ -28,7 +28,8 @@ class PagedSurveyResult:
 
 BIOBRAIN_FIELD_MAP = {
     "surveyId": "SurveyId", "surveyName": "Name", "CPI": "Revenue", "IR": "IncidentRate",
-    "LOI": "LengthOfInterview", "supCmps": "Completes", "entryLink": "SurveyUrl",
+    "LOI": "LengthOfInterview", "N": "Completes", "supCmps": "Completes",
+    "remainingN": "Completes", "entryLink": "SurveyUrl",
     "isQuota": "Has_Quotas", "isPIIRequired": "CollectPii", "createdDate": "StartDate",
     "modifiedDate": "LastUpdatedOnUTC", "Language": "LanguageId",
 }
