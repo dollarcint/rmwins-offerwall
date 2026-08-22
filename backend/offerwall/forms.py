@@ -448,6 +448,94 @@ class PlacementPostbackForm(forms.ModelForm):
             instance.save()
         return instance
 
+
+class AdminPlacementCurrencyForm(forms.ModelForm):
+    """Admin-only currency controls, including the placement settlement currency."""
+
+    class Meta:
+        model = PublisherPlacement
+        fields = [
+            "currency",
+            "currency_name",
+            "user_revenue_share",
+            "currency_multiplier",
+            "reward_rounding_precision",
+        ]
+        widgets = {
+            "currency": forms.TextInput(attrs={"maxlength": 3, "placeholder": "USD"}),
+            "currency_name": forms.TextInput(attrs={"maxlength": 6, "placeholder": "Points"}),
+            "user_revenue_share": forms.NumberInput(
+                attrs={"min": 0, "max": 100, "step": "0.01"}
+            ),
+            "currency_multiplier": forms.NumberInput(
+                attrs={"min": "0.000001", "step": "0.000001"}
+            ),
+        }
+
+    def clean_currency(self):
+        value = str(self.cleaned_data.get("currency") or "").strip().upper()
+        if len(value) != 3 or not value.isalpha():
+            raise ValidationError("Currency must be a 3-letter ISO code.")
+        return value
+
+    def clean_currency_name(self):
+        value = str(self.cleaned_data.get("currency_name") or "").strip()
+        if not value:
+            raise ValidationError("Enter a currency name.")
+        return value
+
+
+class AdminPlacementPostbackForm(forms.ModelForm):
+    postback_url = forms.CharField(
+        required=False,
+        widget=forms.TextInput(
+            attrs={"placeholder": "https://partner.example/postback?sid={SID}"}
+        ),
+    )
+
+    class Meta:
+        model = PublisherPlacement
+        fields = [
+            "postback_enabled",
+            "postback_url",
+            "whitelist_postback_ip",
+            "postback_email_opt_out",
+        ]
+
+    def clean_postback_url(self):
+        return _clean_https_url_template(
+            self.cleaned_data.get("postback_url"),
+            required=False,
+        )
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("postback_enabled") and not cleaned.get("postback_url"):
+            self.add_error("postback_url", "Add a postback URL before enabling delivery.")
+        return cleaned
+
+
+class AdminPlacementVariableMappingForm(forms.ModelForm):
+    class Meta:
+        model = PublisherPlacement
+        fields = [
+            "respondent_id_parameter",
+            "campaign_id_parameter",
+            "affiliate_sub_parameter",
+        ]
+
+    def clean(self):
+        cleaned = super().clean()
+        values = [
+            cleaned.get("respondent_id_parameter"),
+            cleaned.get("campaign_id_parameter"),
+            cleaned.get("affiliate_sub_parameter"),
+        ]
+        populated = [str(value).lower() for value in values if value]
+        if len(populated) != len(set(populated)):
+            raise ValidationError("Each incoming variable must use a different parameter name.")
+        return cleaned
+
 class PlacementDesignForm(forms.ModelForm):
     CONTENT_CHOICES = (
         ("offers", "Offers"),

@@ -1,0 +1,47 @@
+{% extends 'offerwall/admin_base.html' %}
+{% block title %}{{ publisher.name }} · Supplier · RM Wins Admin{% endblock %}
+{% block page_name %}Supplier detail{% endblock %}
+{% block content %}
+<section class="rmw-admin-page-heading rmw-admin-detail-heading">
+  <div><a class="rmw-admin-back-link" href="{% url 'offerwall:admin-suppliers' %}">← All suppliers</a><p class="rmw-admin-kicker">Publisher #{{ publisher.publisher_code }}</p><h1>{{ publisher.name }}</h1><p>{{ registration.business_email|default:publisher.slug }} · Joined {{ publisher.created_at|date:'d M Y' }}</p></div>
+  <div class="rmw-admin-detail-heading-actions"><span class="rmw-admin-status {{ publisher.operational_status }}">{{ publisher.get_operational_status_display }}</span><a class="rmw-admin-primary-action" href="{% url 'offerwall:admin-inventory' %}?supplier={{ publisher.public_id }}">Manage allocation</a></div>
+</section>
+
+{% if publisher.operational_note %}<section class="rmw-admin-alert-card"><strong>{{ publisher.get_operational_status_display }} reason</strong><p>{{ publisher.operational_note }}</p><small>{{ publisher.operational_status_changed_at|date:'d M Y, H:i' }}{% if publisher.operational_status_changed_by %} · {{ publisher.operational_status_changed_by.username }}{% endif %}</small></section>{% endif %}
+
+<section class="rmw-admin-stat-grid rmw-admin-stat-grid-compact">
+  <article class="accent"><span>Net released earnings</span><strong>{{ wallet.currency }} {{ wallet.net_earnings|floatformat:2 }}</strong><small>{{ wallet.pending|floatformat:2 }} pending hold</small></article>
+  <article><span>Traffic</span><strong>{{ supplier_detail_stats.clicks }}</strong><small>{{ supplier_detail_stats.completes }} verified completes · {{ supplier_detail_stats.conversion_rate }}% CVR</small></article>
+  <article><span>Audience</span><strong>{{ supplier_detail_stats.respondents }}</strong><small>respondent accounts</small></article>
+  <article><span>Placements</span><strong>{{ supplier_detail_stats.placements }}</strong><small>all integrations</small></article>
+</section>
+
+<section class="rmw-admin-detail-grid">
+  <article class="rmw-admin-card rmw-admin-detail-card"><div class="rmw-admin-card-head"><div><span>Supplier profile</span><h2>Registration &amp; account</h2></div></div><dl class="rmw-admin-detail-list">
+    <div><dt>Registration</dt><dd>{% if registration %}{{ registration.get_status_display }}{% else %}Internal supplier{% endif %}</dd></div>
+    <div><dt>Portal username</dt><dd>{{ registration.user.username|default:'—' }}</dd></div>
+    <div><dt>Contact</dt><dd>{{ registration.contact_name|default:'—' }}</dd></div>
+    <div><dt>Country</dt><dd>{{ registration.country|default:'—' }}</dd></div>
+    <div><dt>Website</dt><dd>{% if registration.website %}<a href="{{ registration.website }}" target="_blank" rel="noopener">{{ registration.website|truncatechars:40 }}</a>{% else %}—{% endif %}</dd></div>
+    <div><dt>API key</dt><dd><code>{{ publisher.masked_api_key }}</code></dd></div>
+  </dl></article>
+  <article class="rmw-admin-card rmw-admin-detail-card"><div class="rmw-admin-card-head"><div><span>Commercial controls</span><h2>Current economics</h2></div></div><dl class="rmw-admin-detail-list">
+    <div><dt>Supplier payout</dt><dd>{{ publisher.payout_percent }}%</dd></div>
+    <div><dt>RM Wins default cut</dt><dd>{{ publisher.platform_cut_percent|floatformat:2 }}%</dd></div>
+    <div><dt>Reward hold</dt><dd>{{ publisher.reward_hold_hours }} hours</dd></div>
+    <div><dt>Manual review</dt><dd>Risk score ≥ {{ publisher.risk_review_threshold }}</dd></div>
+    <div><dt>Available</dt><dd>{{ wallet.currency }} {{ wallet.available|floatformat:2 }}</dd></div>
+    <div><dt>Paid</dt><dd>{{ wallet.currency }} {{ wallet.paid|floatformat:2 }}</dd></div>
+  </dl></article>
+</section>
+
+<section class="rmw-admin-card rmw-admin-table-card">
+  <div class="rmw-admin-card-head"><div><span>Placement performance</span><h2>{{ placements|length }} integrations</h2></div><a class="rmw-admin-text-link" href="{% url 'offerwall:admin-placements' %}?publisher={{ publisher.public_id }}">Filtered registry</a></div>
+  <div class="rmw-admin-table-wrap"><table><thead><tr><th>Placement</th><th>Status</th><th>Visits</th><th>Respondents</th><th>Clicks / completes</th><th>CVR</th><th>Net earnings</th></tr></thead><tbody>{% for placement in placements %}<tr><td><strong><a class="rmw-admin-table-link" href="{% url 'offerwall:admin-placement-detail' placement.public_id %}">{{ placement.website_name }}</a></strong><small>{{ placement.app_id }}</small></td><td><span class="rmw-admin-status {{ placement.status }}">{{ placement.get_status_display }}</span></td><td>{{ placement.visit_count }}</td><td>{{ placement.respondent_count }}</td><td>{{ placement.click_count }} / {{ placement.complete_count }}</td><td>{{ placement.conversion_rate }}%</td><td><strong>{{ publisher.currency }} {{ placement.net_earnings|floatformat:2 }}</strong></td></tr>{% empty %}<tr><td colspan="7">No placements created.</td></tr>{% endfor %}</tbody></table></div>
+</section>
+
+<section class="rmw-admin-detail-grid">
+  <article class="rmw-admin-card rmw-admin-table-card"><div class="rmw-admin-card-head"><div><span>Audience</span><h2>Recent respondents</h2></div><a class="rmw-admin-text-link" href="{% url 'offerwall:admin-respondents' %}?publisher={{ publisher.public_id }}">View all</a></div><div class="rmw-admin-compact-list">{% for respondent in recent_respondents %}<div><span class="rmw-admin-status {% if respondent.is_banned %}suspended{% elif respondent.is_email_verified %}active{% else %}pending{% endif %}">{% if respondent.is_banned %}Banned{% elif respondent.is_email_verified %}Verified{% else %}Unverified{% endif %}</span><p><strong>{{ respondent.external_user_id }}</strong><small>{{ respondent.last_placement.website_name|default:'Direct wall' }} · {{ respondent.last_seen_at|timesince }} ago</small></p></div>{% empty %}<p class="rmw-admin-empty">No respondent activity.</p>{% endfor %}</div></article>
+  <article class="rmw-admin-card rmw-admin-table-card"><div class="rmw-admin-card-head"><div><span>Traffic</span><h2>Recent clicks</h2></div></div><div class="rmw-admin-compact-list">{% for click in recent_clicks %}<div><span class="rmw-admin-status {{ click.status }}">{{ click.status }}</span><p><strong>{{ click.survey.local_id }} · {{ click.external_user_id }}</strong><small>{{ click.visit.placement.website_name|default:'Direct wall' }} · {{ click.created_at|date:'d M, H:i' }}</small></p><b>{{ click.currency }} {{ click.payout_snapshot|default:'0.00' }}</b></div>{% empty %}<p class="rmw-admin-empty">No clicks recorded.</p>{% endfor %}</div></article>
+</section>
+{% endblock %}

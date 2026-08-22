@@ -971,15 +971,49 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(registration.status, PublisherPortalAccount.Status.APPROVED)
         self.assertEqual(registration.reviewed_by, admin_user)
         self.assertTrue(supplier.is_active)
+        self.assertEqual(
+            supplier.operational_status,
+            Publisher.OperationalStatus.ACTIVE,
+        )
+
+        detail = self.client.get(
+            reverse(
+                "offerwall:admin-supplier-detail",
+                kwargs={"publisher_id": supplier.public_id},
+            )
+        )
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, "Supplier profile")
+        self.assertContains(detail, "Manage allocation")
 
         self.client.post(
             reverse("offerwall:admin-suppliers"),
-            {"action": "disable", "publisher_id": supplier.public_id},
+            {"action": "pause", "publisher_id": supplier.public_id},
         )
         supplier.refresh_from_db()
         registration.refresh_from_db()
         self.assertFalse(supplier.is_active)
+        self.assertEqual(
+            supplier.operational_status,
+            Publisher.OperationalStatus.PAUSED,
+        )
         self.assertEqual(registration.status, PublisherPortalAccount.Status.APPROVED)
+
+        self.client.post(
+            reverse("offerwall:admin-suppliers"),
+            {
+                "action": "suspend",
+                "publisher_id": supplier.public_id,
+                "admin_note": "Repeated compliance failures.",
+            },
+        )
+        supplier.refresh_from_db()
+        self.assertEqual(
+            supplier.operational_status,
+            Publisher.OperationalStatus.SUSPENDED,
+        )
+        self.assertEqual(supplier.operational_note, "Repeated compliance failures.")
+        self.assertEqual(supplier.operational_status_changed_by, admin_user)
 
         self.client.post(
             reverse("offerwall:admin-suppliers"),
@@ -987,6 +1021,10 @@ class OfferwallFlowTests(TestCase):
         )
         supplier.refresh_from_db()
         self.assertTrue(supplier.is_active)
+        self.assertEqual(
+            supplier.operational_status,
+            Publisher.OperationalStatus.ACTIVE,
+        )
 
         self.client.post(
             reverse("offerwall:admin-suppliers"),
@@ -1000,6 +1038,10 @@ class OfferwallFlowTests(TestCase):
         supplier.refresh_from_db()
         self.assertEqual(registration.status, PublisherPortalAccount.Status.REJECTED)
         self.assertFalse(supplier.is_active)
+        self.assertEqual(
+            supplier.operational_status,
+            Publisher.OperationalStatus.SUSPENDED,
+        )
 
     def test_new_admin_moderates_placements_and_respondents(self):
         self._open_admin_session(suffix="audience-ops")
@@ -1032,6 +1074,81 @@ class OfferwallFlowTests(TestCase):
         self.assertContains(placement_page, "Admin Audience Site")
         self.assertContains(placement_page, placement.app_id)
         self.assertContains(placement_page, "1 visits")
+        self.assertContains(
+            placement_page,
+            reverse(
+                "offerwall:admin-placement-detail",
+                kwargs={"placement_id": placement.public_id},
+            ),
+        )
+        placement_detail_url = reverse(
+            "offerwall:admin-placement-detail",
+            kwargs={"placement_id": placement.public_id},
+        )
+        placement_detail = self.client.get(placement_detail_url)
+        self.assertEqual(placement_detail.status_code, 200)
+        self.assertContains(placement_detail, "Iframe preview &amp; URL")
+        self.assertContains(placement_detail, "Variable mapping")
+        self.assertContains(placement_detail, "Global postback")
+
+        mapping_saved = self.client.post(
+            placement_detail_url,
+            {
+                "form_type": "mapping",
+                "respondent_id_parameter": "member_id",
+                "campaign_id_parameter": "campaign_ref",
+                "affiliate_sub_parameter": "source_ref",
+            },
+        )
+        self.assertEqual(mapping_saved.status_code, 302)
+        currency_saved = self.client.post(
+            placement_detail_url,
+            {
+                "form_type": "currency",
+                "currency": "INR",
+                "currency_name": "Coins",
+                "user_revenue_share": "80.00",
+                "currency_multiplier": "10.000000",
+                "reward_rounding_precision": "2",
+            },
+        )
+        self.assertEqual(currency_saved.status_code, 302)
+        domains_saved = self.client.post(
+            placement_detail_url,
+            {
+                "form_type": "general",
+                "traffic_type": PublisherPlacement.TrafficType.BOTH,
+                "allowed_domains": "rewards.example.test\n*.partner.example.test",
+            },
+        )
+        self.assertEqual(domains_saved.status_code, 302)
+        postback_saved = self.client.post(
+            placement_detail_url,
+            {
+                "form_type": "postback",
+                "postback_enabled": "on",
+                "postback_url": "https://callbacks.example.test/event?sid={SID}",
+                "whitelist_postback_ip": "on",
+            },
+        )
+        self.assertEqual(postback_saved.status_code, 302)
+        placement.refresh_from_db()
+        self.assertEqual(placement.respondent_id_parameter, "member_id")
+        self.assertEqual(placement.currency, "INR")
+        self.assertEqual(placement.currency_name, "Coins")
+        self.assertEqual(placement.user_revenue_share, Decimal("80.00"))
+        self.assertIn("*.partner.example.test", placement.allowed_domain_list)
+        self.assertTrue(placement.postback_enabled)
+        self.assertIn("{SID}", placement.postback_url)
+
+        supplier_detail = self.client.get(
+            reverse(
+                "offerwall:admin-supplier-detail",
+                kwargs={"publisher_id": self.publisher.public_id},
+            )
+        )
+        self.assertContains(supplier_detail, "Admin Audience Site")
+        self.assertContains(supplier_detail, placement.app_id)
         self.client.post(
             reverse("offerwall:admin-placements"),
             {"action": "pause", "placement_id": placement.public_id},

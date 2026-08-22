@@ -80,12 +80,13 @@ class PublisherAdmin(admin.ModelAdmin):
         "payout_percent",
         "currency",
         "postback_enabled",
+        "operational_status",
         "is_active",
         "masked_api_key_display",
         "wallet_balance_display",
         "updated_at",
     ]
-    list_filter = ["is_active", "postback_enabled", "currency"]
+    list_filter = ["operational_status", "is_active", "postback_enabled", "currency"]
     search_fields = ["name", "slug", "publisher_number", "public_id"]
     readonly_fields = [
         "publisher_number",
@@ -99,11 +100,29 @@ class PublisherAdmin(admin.ModelAdmin):
         "signing_secret_changed_at",
         "api_key_changed_at",
         "api_key_last_used_at",
+        "operational_status_changed_at",
+        "operational_status_changed_by",
         "created_at",
         "updated_at",
     ]
     fieldsets = [
-        ("Publisher", {"fields": ["name", "slug", "publisher_number", "public_id", "service_user", "is_active"]}),
+        (
+            "Publisher",
+            {
+                "fields": [
+                    "name",
+                    "slug",
+                    "publisher_number",
+                    "public_id",
+                    "service_user",
+                    "operational_status",
+                    "operational_note",
+                    "operational_status_changed_at",
+                    "operational_status_changed_by",
+                    "is_active",
+                ]
+            },
+        ),
         (
             "Commercial",
             {

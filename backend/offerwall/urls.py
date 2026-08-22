@@ -25,9 +25,19 @@ urlpatterns = [
         name="admin-suppliers",
     ),
     path(
+        "admin-portal/suppliers/<uuid:publisher_id>/",
+        views.admin_portal_supplier_detail,
+        name="admin-supplier-detail",
+    ),
+    path(
         "admin-portal/placements/",
         views.admin_portal_placements,
         name="admin-placements",
+    ),
+    path(
+        "admin-portal/placements/<uuid:placement_id>/",
+        views.admin_portal_placement_detail,
+        name="admin-placement-detail",
     ),
     path(
         "admin-portal/respondents/",

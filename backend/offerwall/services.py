@@ -82,9 +82,27 @@ def review_publisher_registration(
             ]
         )
         should_be_active = status == PublisherPortalAccount.Status.APPROVED
-        if locked.publisher.is_active != should_be_active:
-            locked.publisher.is_active = should_be_active
-            locked.publisher.save(update_fields=["is_active", "updated_at"])
+        operational_status = (
+            Publisher.OperationalStatus.ACTIVE
+            if should_be_active
+            else Publisher.OperationalStatus.SUSPENDED
+        )
+        publisher = locked.publisher
+        publisher.is_active = should_be_active
+        publisher.operational_status = operational_status
+        publisher.operational_note = locked.admin_note if not should_be_active else ""
+        publisher.operational_status_changed_at = timezone.now()
+        publisher.operational_status_changed_by = reviewer
+        publisher.save(
+            update_fields=[
+                "is_active",
+                "operational_status",
+                "operational_note",
+                "operational_status_changed_at",
+                "operational_status_changed_by",
+                "updated_at",
+            ]
+        )
         return locked
 
 

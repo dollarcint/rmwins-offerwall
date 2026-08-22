@@ -50,6 +50,9 @@ from surveys.models import Survey, SurveyAttempt
 from surveys.outcomes import provider_outcome
 
 from .forms import (
+    AdminPlacementCurrencyForm,
+    AdminPlacementPostbackForm,
+    AdminPlacementVariableMappingForm,
     AdminPortalLoginForm,
     AdminPortalPasswordChangeForm,
     PlacementCurrencyForm,
@@ -1083,7 +1086,13 @@ def admin_portal_suppliers(request):
                     request,
                     f"{publisher.name} registration marked {review_status}.",
                 )
-            elif action in {"enable", "disable"}:
+            elif action in {"enable", "disable", "pause", "suspend"}:
+                target_status = {
+                    "enable": Publisher.OperationalStatus.ACTIVE,
+                    "disable": Publisher.OperationalStatus.PAUSED,
+                    "pause": Publisher.OperationalStatus.PAUSED,
+                    "suspend": Publisher.OperationalStatus.SUSPENDED,
+                }[action]
                 if action == "enable" and registration and (
                     registration.status != PublisherPortalAccount.Status.APPROVED
                 ):
@@ -1097,11 +1106,29 @@ def admin_portal_suppliers(request):
                         ),
                     )
                 else:
-                    publisher.is_active = action == "enable"
-                    publisher.save(update_fields=["is_active", "updated_at"])
+                    note = str(request.POST.get("admin_note") or "").strip()[:500]
+                    if action == "suspend" and not note:
+                        raise ValidationError("Enter a suspension reason for the audit trail.")
+                    publisher.is_active = target_status == Publisher.OperationalStatus.ACTIVE
+                    publisher.operational_status = target_status
+                    publisher.operational_note = (
+                        "" if publisher.is_active else note or "Paused by Offerwall administrator."
+                    )
+                    publisher.operational_status_changed_at = timezone.now()
+                    publisher.operational_status_changed_by = account.user
+                    publisher.save(
+                        update_fields=[
+                            "is_active",
+                            "operational_status",
+                            "operational_note",
+                            "operational_status_changed_at",
+                            "operational_status_changed_by",
+                            "updated_at",
+                        ]
+                    )
                 messages.success(
                     request,
-                    f"{publisher.name} is now {'active' if action == 'enable' else 'disabled'}.",
+                    f"{publisher.name} is now {Publisher.OperationalStatus(target_status).label.lower()}.",
                 )
             elif action == "save-controls":
                 raw_payout = str(request.POST.get("payout_percent") or "").strip()
@@ -1167,8 +1194,8 @@ def admin_portal_suppliers(request):
             | Q(slug__icontains=query)
             | Q(portal_account__business_email__icontains=query)
         )
-    if status == "active":
-        publishers = publishers.filter(is_active=True)
+    if status in {value for value, _ in Publisher.OperationalStatus.choices}:
+        publishers = publishers.filter(operational_status=status)
     elif status == "inactive":
         publishers = publishers.filter(is_active=False)
     elif status in {
@@ -1195,12 +1222,109 @@ def admin_portal_suppliers(request):
             "supplier_stats": {
                 "total": Publisher.objects.count(),
                 "active": Publisher.objects.filter(is_active=True).count(),
+                "paused": Publisher.objects.filter(
+                    operational_status=Publisher.OperationalStatus.PAUSED
+                ).count(),
+                "suspended": Publisher.objects.filter(
+                    operational_status=Publisher.OperationalStatus.SUSPENDED
+                ).count(),
                 "pending": PublisherPortalAccount.objects.filter(status=PublisherPortalAccount.Status.PENDING).count(),
                 "placements": PublisherPlacement.objects.filter(status=PublisherPlacement.Status.ACTIVE).count(),
             },
         }
     )
     return _no_store(render(request, "offerwall/admin_suppliers.html", context))
+
+
+@require_GET
+def admin_portal_supplier_detail(request, publisher_id):
+    account, denied = _admin_portal_or_response(request)
+    if denied:
+        return denied
+    publisher = get_object_or_404(
+        Publisher.objects.select_related(
+            "portal_account",
+            "portal_account__user",
+            "operational_status_changed_by",
+        ),
+        public_id=publisher_id,
+    )
+    placements = list(
+        publisher.placements.annotate(
+            visit_count=Count("visits", distinct=True),
+            respondent_count=Count("visits__respondent", distinct=True),
+            click_count=Count("visits__clicks", distinct=True),
+            complete_count=Count(
+                "visits__clicks",
+                filter=Q(
+                    visits__clicks__status=SurveyAttempt.Status.COMPLETED,
+                    visits__clicks__is_verified=True,
+                ),
+                distinct=True,
+            ),
+        ).order_by("-created_at")
+    )
+    placement_ids = [placement.pk for placement in placements]
+    earnings_by_placement = {
+        row["click__visit__placement_id"]: row
+        for row in RewardLedgerEntry.objects.filter(
+            publisher=publisher,
+            click__visit__placement_id__in=placement_ids,
+        )
+        .exclude(status=RewardLedgerEntry.Status.VOIDED)
+        .values("click__visit__placement_id")
+        .annotate(
+            credits=Sum("amount", filter=Q(entry_type=RewardLedgerEntry.EntryType.CREDIT)),
+            reversals=Sum(
+                "amount", filter=Q(entry_type=RewardLedgerEntry.EntryType.REVERSAL)
+            ),
+        )
+    }
+    for placement in placements:
+        earnings = earnings_by_placement.get(placement.pk, {})
+        credits = earnings.get("credits") or Decimal("0.00")
+        reversals = earnings.get("reversals") or Decimal("0.00")
+        placement.net_earnings = credits - reversals
+        placement.conversion_rate = _admin_percentage(
+            placement.complete_count,
+            placement.click_count,
+        )
+    clicks = publisher.offer_clicks.select_related(
+        "survey",
+        "visit",
+        "visit__placement",
+    )
+    click_stats = clicks.aggregate(
+        clicks=Count("id"),
+        completes=Count(
+            "id",
+            filter=Q(status=SurveyAttempt.Status.COMPLETED, is_verified=True),
+        ),
+    )
+    publisher.platform_cut_percent = Decimal("100.00") - publisher.payout_percent
+    context = _admin_base_context(account, "suppliers")
+    context.update(
+        {
+            "publisher": publisher,
+            "registration": getattr(publisher, "portal_account", None),
+            "placements": placements,
+            "recent_respondents": publisher.respondents.select_related(
+                "last_placement"
+            ).order_by("-last_seen_at")[:10],
+            "recent_clicks": clicks.order_by("-created_at")[:10],
+            "wallet": wallet_summary(publisher),
+            "supplier_detail_stats": {
+                "placements": len(placements),
+                "respondents": publisher.respondents.count(),
+                "clicks": click_stats["clicks"],
+                "completes": click_stats["completes"],
+                "conversion_rate": _admin_percentage(
+                    click_stats["completes"], click_stats["clicks"]
+                ),
+            },
+        }
+    )
+    return _no_store(render(request, "offerwall/admin_supplier_detail.html", context))
 
 
 @require_http_methods(["GET", "POST"])
@@ -1330,6 +1454,85 @@ def admin_portal_placements(request):
         }
     )
     return _no_store(render(request, "offerwall/admin_placements.html", context))
+
+
+@require_http_methods(["GET", "POST"])
+def admin_portal_placement_detail(request, placement_id):
+    account, denied = _admin_portal_or_response(request)
+    if denied:
+        return denied
+    placement = get_object_or_404(
+        PublisherPlacement.objects.select_related("publisher"),
+        public_id=placement_id,
+    )
+    form_type = str(request.POST.get("form_type") or "").strip().lower()
+    form_classes = {
+        "general": PlacementGeneralForm,
+        "mapping": AdminPlacementVariableMappingForm,
+        "currency": AdminPlacementCurrencyForm,
+        "postback": AdminPlacementPostbackForm,
+    }
+    bound_forms = {}
+    if request.method == "POST":
+        form_class = form_classes.get(form_type)
+        if form_class is None:
+            raise Http404
+        form = form_class(request.POST, instance=placement)
+        bound_forms[form_type] = form
+        if form.is_valid():
+            form.save()
+            messages.success(request, f"{form_type.title()} configuration saved.")
+            destination = reverse(
+                "offerwall:admin-placement-detail",
+                kwargs={"placement_id": placement.public_id},
+            )
+            return _no_store(HttpResponseRedirect(f"{destination}#{form_type}"))
+    _placement_embed_details(request, placement)
+    ledger_totals = (
+        RewardLedgerEntry.objects.filter(
+            publisher=placement.publisher,
+            click__visit__placement=placement,
+        )
+        .exclude(status=RewardLedgerEntry.Status.VOIDED)
+        .aggregate(
+            credits=Sum("amount", filter=Q(entry_type=RewardLedgerEntry.EntryType.CREDIT)),
+            reversals=Sum(
+                "amount", filter=Q(entry_type=RewardLedgerEntry.EntryType.REVERSAL)
+            ),
+        )
+    )
+    credits = ledger_totals["credits"] or Decimal("0.00")
+    reversals = ledger_totals["reversals"] or Decimal("0.00")
+    placement_clicks = OfferClick.objects.filter(visit__placement=placement)
+    placement_stats = {
+        "visits": WallVisit.objects.filter(placement=placement).count(),
+        "respondents": RespondentProfile.objects.filter(
+            visits__placement=placement
+        ).distinct().count(),
+        "clicks": placement_clicks.count(),
+        "completes": placement_clicks.filter(
+            status=SurveyAttempt.Status.COMPLETED,
+            is_verified=True,
+        ).count(),
+        "earnings": credits - reversals,
+    }
+    context = _admin_base_context(account, "placements")
+    context.update(
+        {
+            "placement": placement,
+            "placement_stats": placement_stats,
+            "general_form": bound_forms.get("general")
+            or PlacementGeneralForm(instance=placement),
+            "mapping_form": bound_forms.get("mapping")
+            or AdminPlacementVariableMappingForm(instance=placement),
+            "currency_form": bound_forms.get("currency")
+            or AdminPlacementCurrencyForm(instance=placement),
+            "postback_form": bound_forms.get("postback")
+            or AdminPlacementPostbackForm(instance=placement),
+            "event_postbacks": placement.event_postbacks.select_related("survey"),
+        }
+    )
+    return _no_store(render(request, "offerwall/admin_placement_detail.html", context))
 
 
 @require_http_methods(["GET", "POST"])
@@ -1722,6 +1925,7 @@ def admin_portal_postbacks(request):
     )
     query = str(request.GET.get("q") or "").strip()[:160]
     publisher_id = str(request.GET.get("publisher") or "").strip()
+    placement_id = str(request.GET.get("placement") or "").strip()
     status = str(request.GET.get("status") or "all").strip().lower()
     event_type = str(request.GET.get("event") or "all").strip().lower()
     if query:
@@ -1741,6 +1945,11 @@ def admin_portal_postbacks(request):
             deliveries = deliveries.filter(publisher__public_id=uuid.UUID(publisher_id))
         except (TypeError, ValueError):
             publisher_id = ""
+    if placement_id:
+        try:
+            deliveries = deliveries.filter(placement__public_id=uuid.UUID(placement_id))
+        except (TypeError, ValueError):
+            placement_id = ""
     if status in {value for value, _ in PostbackDelivery.Status.choices}:
         deliveries = deliveries.filter(status=status)
     else:
@@ -1768,6 +1977,7 @@ def admin_portal_postbacks(request):
             "filters": {
                 "q": query,
                 "publisher": publisher_id,
+                "placement": placement_id,
                 "status": status,
                 "event": event_type,
             },
@@ -1932,6 +2142,7 @@ def supplier_signup(request):
                     name=data["company_name"],
                     slug=_registration_slug(data["company_name"]),
                     is_active=False,
+                    operational_status=Publisher.OperationalStatus.PAUSED,
                 )
                 PublisherPortalAccount.objects.create(
                     user=user,

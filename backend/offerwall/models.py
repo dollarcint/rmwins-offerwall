@@ -70,6 +70,11 @@ class OfferwallAdminPortalAccount(models.Model):
 class Publisher(models.Model):
     """One external publisher/application embedding the RM Wins offerwall."""
 
+    class OperationalStatus(models.TextChoices):
+        ACTIVE = "active", "Active"
+        PAUSED = "paused", "Paused"
+        SUSPENDED = "suspended", "Suspended"
+
     name = models.CharField(max_length=160)
     slug = models.SlugField(
         max_length=64,
@@ -116,6 +121,21 @@ class Publisher(models.Model):
     )
     currency = models.CharField(max_length=3, default="USD")
     is_active = models.BooleanField(default=True, db_index=True)
+    operational_status = models.CharField(
+        max_length=12,
+        choices=OperationalStatus.choices,
+        default=OperationalStatus.ACTIVE,
+        db_index=True,
+    )
+    operational_note = models.CharField(max_length=500, blank=True)
+    operational_status_changed_at = models.DateTimeField(null=True, blank=True)
+    operational_status_changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="changed_offerwall_supplier_statuses",
+    )
     encrypted_signing_secret = models.TextField(blank=True, editable=False)
     signing_secret_last_four = models.CharField(max_length=4, blank=True, editable=False)
     signing_secret_changed_at = models.DateTimeField(null=True, blank=True, editable=False)
@@ -174,6 +194,25 @@ class Publisher(models.Model):
     def save(self, *args, **kwargs):
         self.slug = str(self.slug or "").strip().lower()
         self.currency = str(self.currency or "USD").strip().upper()
+        if (
+            self._state.adding
+            and not self.is_active
+            and self.operational_status == self.OperationalStatus.ACTIVE
+        ):
+            self.operational_status = self.OperationalStatus.PAUSED
+        update_fields = kwargs.get("update_fields")
+        if (
+            not self._state.adding
+            and update_fields
+            and "is_active" in update_fields
+            and "operational_status" not in update_fields
+        ):
+            self.operational_status = (
+                self.OperationalStatus.ACTIVE
+                if self.is_active
+                else self.OperationalStatus.PAUSED
+            )
+            kwargs["update_fields"] = set(update_fields) | {"operational_status"}
         if not self.encrypted_signing_secret:
             self.set_signing_secret(generate_signing_secret())
         if not self.api_key_hash:
