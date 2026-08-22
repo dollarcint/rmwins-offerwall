@@ -60,6 +60,11 @@ urlpatterns = [
         name="admin-postbacks",
     ),
     path(
+        "admin-portal/reports/",
+        views.admin_portal_reports,
+        name="admin-reports",
+    ),
+    path(
         "admin-portal/activity/",
         views.admin_portal_activity,
         name="admin-activity",

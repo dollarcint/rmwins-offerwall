@@ -1551,6 +1551,14 @@ def admin_portal_placement_detail(request, placement_id):
     }
     bound_forms = {}
     if request.method == "POST":
+        if form_type == "test-postback":
+            success, message = _test_placement_postback_connection(placement)
+            (messages.success if success else messages.error)(request, message)
+            destination = reverse(
+                "offerwall:admin-placement-detail",
+                kwargs={"placement_id": placement.public_id},
+            )
+            return _no_store(HttpResponseRedirect(f"{destination}#postback"))
         form_class = form_classes.get(form_type)
         if form_class is None:
             raise Http404
@@ -1624,11 +1632,15 @@ def admin_portal_respondents(request):
         )
         action = str(request.POST.get("action") or "").strip().lower()
         if action == "ban":
+            ban_reason = str(request.POST.get("reason") or "").strip()[:255]
+            if not ban_reason:
+                messages.error(request, "Enter a ban reason for the audit trail.")
+                return _no_store(
+                    HttpResponseRedirect(reverse("offerwall:admin-respondents"))
+                )
             respondent.is_banned = True
             respondent.banned_at = timezone.now()
-            respondent.ban_reason = str(
-                request.POST.get("reason") or "Banned by Offerwall administrator."
-            ).strip()[:255]
+            respondent.ban_reason = ban_reason
             respondent.save(
                 update_fields=["is_banned", "banned_at", "ban_reason", "updated_at"]
             )
@@ -1686,12 +1698,106 @@ def admin_portal_respondents(request):
         status = "all"
 
     all_respondents = RespondentProfile.objects.all()
+    page = Paginator(respondents.order_by("-last_seen_at"), 30).get_page(
+        request.GET.get("page")
+    )
+    page.object_list = list(page.object_list)
+    respondent_ids = [respondent.pk for respondent in page.object_list]
+    latest_visits = {}
+    for visit in (
+        WallVisit.objects.filter(respondent_id__in=respondent_ids)
+        .select_related("placement")
+        .order_by("respondent_id", "-last_seen_at")
+    ):
+        latest_visits.setdefault(visit.respondent_id, visit)
+    ip_keys = {
+        (visit.publisher_id, visit.ip_hash)
+        for visit in latest_visits.values()
+        if visit.ip_hash
+    }
+    ip_counts = {
+        (row["publisher_id"], row["ip_hash"]): row["users"]
+        for row in WallVisit.objects.filter(
+            publisher_id__in={key[0] for key in ip_keys},
+            ip_hash__in={key[1] for key in ip_keys},
+            created_at__gte=timezone.now() - timedelta(hours=24),
+        )
+        .values("publisher_id", "ip_hash")
+        .annotate(users=Count("external_user_id", distinct=True))
+    }
+    respondent_keys = {
+        (respondent.publisher_id, respondent.external_user_id)
+        for respondent in page.object_list
+    }
+    recent_click_counts = {
+        (row["publisher_id"], row["external_user_id"]): row["clicks"]
+        for row in OfferClick.objects.filter(
+            publisher_id__in={key[0] for key in respondent_keys},
+            external_user_id__in={key[1] for key in respondent_keys},
+            created_at__gte=timezone.now() - timedelta(minutes=10),
+        )
+        .values("publisher_id", "external_user_id")
+        .annotate(clicks=Count("id"))
+    }
+    email_hashes = {
+        respondent.email_hash
+        for respondent in page.object_list
+        if respondent.email_hash
+    }
+    duplicate_email_counts = {
+        row["email_hash"]: row["accounts"]
+        for row in RespondentProfile.objects.filter(email_hash__in=email_hashes)
+        .values("email_hash")
+        .annotate(accounts=Count("id"))
+    }
+    flagged_page = 0
+    for respondent in page.object_list:
+        visit = latest_visits.get(respondent.pk)
+        respondent.latest_device = visit.device if visit else "Unknown"
+        respondent.latest_ip_label = (
+            f"{visit.ip_hash[:12]}…" if visit and visit.ip_hash else "Unavailable"
+        )
+        respondent.shared_ip_users = (
+            ip_counts.get((respondent.publisher_id, visit.ip_hash), 0)
+            if visit and visit.ip_hash
+            else 0
+        )
+        respondent.recent_click_velocity = recent_click_counts.get(
+            (respondent.publisher_id, respondent.external_user_id),
+            0,
+        )
+        respondent.duplicate_email_accounts = duplicate_email_counts.get(
+            respondent.email_hash,
+            0,
+        )
+        score = 0
+        flags = []
+
+        def add_flag(points, label):
+            nonlocal score
+            score += points
+            flags.append(label)
+
+        if respondent.is_banned:
+            add_flag(100, "Banned account")
+        elif not respondent.is_email_verified:
+            add_flag(35, "Email unverified")
+        if respondent.duplicate_email_accounts > 1:
+            add_flag(45, f"Email used by {respondent.duplicate_email_accounts} accounts")
+        if respondent.shared_ip_users >= 4:
+            add_flag(30, f"{respondent.shared_ip_users} IDs on IP / 24h")
+        if respondent.recent_click_velocity >= 8:
+            add_flag(25, f"{respondent.recent_click_velocity} clicks / 10m")
+        if respondent.latest_device in {"Bot", "Unknown"}:
+            add_flag(15, f"Device {respondent.latest_device.lower()}")
+        respondent.fraud_score = min(score, 100)
+        respondent.fraud_flags = flags
+        if flags:
+            flagged_page += 1
     context = _admin_base_context(account, "respondents")
     context.update(
         {
-            "page": Paginator(respondents.order_by("-last_seen_at"), 30).get_page(
-                request.GET.get("page")
-            ),
+            "page": page,
             "filters": {"q": query, "publisher": publisher_id, "status": status},
             "publishers": Publisher.objects.order_by("name"),
             "respondent_stats": {
@@ -1703,6 +1809,7 @@ def admin_portal_respondents(request):
                     is_email_verified=False, is_banned=False
                 ).count(),
                 "banned": all_respondents.filter(is_banned=True).count(),
+                "flagged_page": flagged_page,
             },
         }
     )
@@ -2075,6 +2182,240 @@ def admin_portal_postbacks(request):
         }
     )
     return _no_store(render(request, "offerwall/admin_postbacks.html", context))
+
+
+@require_GET
+def admin_portal_reports(request):
+    account, denied = _admin_portal_or_response(request)
+    if denied:
+        return denied
+    today = timezone.localdate()
+    end_date = parse_date(str(request.GET.get("end") or "")) or today
+    start_date = parse_date(str(request.GET.get("start") or "")) or end_date - timedelta(days=29)
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+    if (end_date - start_date).days > 365:
+        start_date = end_date - timedelta(days=365)
+    start_at = datetime.combine(start_date, time.min)
+    end_at = datetime.combine(end_date + timedelta(days=1), time.min)
+    if settings.USE_TZ:
+        current_zone = timezone.get_current_timezone()
+        start_at = timezone.make_aware(start_at, current_zone)
+        end_at = timezone.make_aware(end_at, current_zone)
+
+    query = str(request.GET.get("q") or "").strip()[:160]
+    publisher_id = str(request.GET.get("publisher") or "").strip()
+    placement_id = str(request.GET.get("placement") or "").strip()
+    country = str(request.GET.get("country") or "").strip().upper()[:8]
+    survey_query = str(request.GET.get("survey") or "").strip()[:160]
+    clicks = OfferClick.objects.filter(
+        created_at__gte=start_at,
+        created_at__lt=end_at,
+    )
+    if publisher_id:
+        try:
+            clicks = clicks.filter(publisher__public_id=uuid.UUID(publisher_id))
+        except (TypeError, ValueError):
+            publisher_id = ""
+    if placement_id:
+        try:
+            clicks = clicks.filter(visit__placement__public_id=uuid.UUID(placement_id))
+        except (TypeError, ValueError):
+            placement_id = ""
+    if country:
+        clicks = clicks.filter(visit__country_code__iexact=country)
+    if survey_query:
+        clicks = clicks.filter(
+            Q(survey__local_id__icontains=survey_query)
+            | Q(survey__name__icontains=survey_query)
+        )
+    if query:
+        clicks = clicks.filter(
+            Q(external_user_id__icontains=query)
+            | Q(publisher__name__icontains=query)
+            | Q(visit__placement__website_name__icontains=query)
+            | Q(survey__local_id__icontains=query)
+            | Q(survey__name__icontains=query)
+        )
+
+    financial_statuses = [
+        OfferConversion.Status.PENDING,
+        OfferConversion.Status.APPROVED,
+    ]
+    money_field = DecimalField(max_digits=16, decimal_places=2)
+    summary = clicks.aggregate(
+        clicks=Count("id"),
+        completes=Count(
+            "id",
+            filter=Q(status=SurveyAttempt.Status.COMPLETED, is_verified=True),
+        ),
+        revenue=Coalesce(
+            Sum(
+                "conversion__source_amount",
+                filter=Q(conversion__status__in=financial_statuses),
+            ),
+            Value(Decimal("0.00"), output_field=money_field),
+            output_field=money_field,
+        ),
+        payout=Coalesce(
+            Sum(
+                "conversion__supplier_amount",
+                filter=Q(conversion__status__in=financial_statuses),
+            ),
+            Value(Decimal("0.00"), output_field=money_field),
+            output_field=money_field,
+        ),
+    )
+    summary["cvr"] = _admin_percentage(summary["completes"], summary["clicks"])
+    summary["margin"] = summary["revenue"] - summary["payout"]
+    currency_rows = list(
+        clicks.values("publisher__currency")
+        .annotate(
+            revenue=Coalesce(
+                Sum(
+                    "conversion__source_amount",
+                    filter=Q(conversion__status__in=financial_statuses),
+                ),
+                Value(Decimal("0.00"), output_field=money_field),
+                output_field=money_field,
+            ),
+            payout=Coalesce(
+                Sum(
+                    "conversion__supplier_amount",
+                    filter=Q(conversion__status__in=financial_statuses),
+                ),
+                Value(Decimal("0.00"), output_field=money_field),
+                output_field=money_field,
+            ),
+        )
+        .order_by("publisher__currency")
+    )
+    for currency_row in currency_rows:
+        currency_row["margin"] = currency_row["revenue"] - currency_row["payout"]
+
+    rows = (
+        clicks.annotate(day=TruncDay("created_at"))
+        .values(
+            "day",
+            "publisher__name",
+            "publisher__public_id",
+            "publisher__currency",
+            "visit__placement__website_name",
+            "visit__placement__public_id",
+            "survey__local_id",
+            "survey__name",
+            "visit__country_code",
+        )
+        .annotate(
+            clicks=Count("id"),
+            completes=Count(
+                "id",
+                filter=Q(status=SurveyAttempt.Status.COMPLETED, is_verified=True),
+            ),
+            revenue=Coalesce(
+                Sum(
+                    "conversion__source_amount",
+                    filter=Q(conversion__status__in=financial_statuses),
+                ),
+                Value(Decimal("0.00"), output_field=money_field),
+                output_field=money_field,
+            ),
+            payout=Coalesce(
+                Sum(
+                    "conversion__supplier_amount",
+                    filter=Q(conversion__status__in=financial_statuses),
+                ),
+                Value(Decimal("0.00"), output_field=money_field),
+                output_field=money_field,
+            ),
+        )
+        .order_by("-day", "publisher__name", "survey__local_id")
+    )
+    filters = {
+        "q": query,
+        "publisher": publisher_id,
+        "placement": placement_id,
+        "country": country,
+        "survey": survey_query,
+        "start": start_date.isoformat(),
+        "end": end_date.isoformat(),
+    }
+
+    def decorate_report_row(row):
+        row["cvr"] = _admin_percentage(row["completes"], row["clicks"])
+        row["margin"] = row["revenue"] - row["payout"]
+        return row
+
+    if str(request.GET.get("export") or "").strip().lower() == "csv":
+        writer = csv.writer(_CsvEcho())
+
+        def report_rows():
+            yield writer.writerow(
+                [
+                    "Date",
+                    "Supplier",
+                    "Placement",
+                    "Country",
+                    "Survey ID",
+                    "Survey",
+                    "Clicks",
+                    "Completes",
+                    "CVR %",
+                    "Revenue",
+                    "Supplier payout",
+                    "Margin",
+                    "Currency",
+                ]
+            )
+            for item in rows.iterator(chunk_size=500):
+                item = decorate_report_row(item)
+                values = [
+                    item["day"].date().isoformat(),
+                    item["publisher__name"],
+                    item["visit__placement__website_name"] or "Direct wall",
+                    item["visit__country_code"] or "Unknown",
+                    item["survey__local_id"],
+                    item["survey__name"] or "Untitled survey",
+                    item["clicks"],
+                    item["completes"],
+                    item["cvr"],
+                    f"{item['revenue']:.2f}",
+                    f"{item['payout']:.2f}",
+                    f"{item['margin']:.2f}",
+                    item["publisher__currency"],
+                ]
+                yield writer.writerow([_safe_csv_cell(value) for value in values])
+
+        response = StreamingHttpResponse(
+            report_rows(), content_type="text/csv; charset=utf-8"
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="rmwins-admin-report-{start_date}-to-{end_date}.csv"'
+        )
+        return _no_store(response)
+
+    page = Paginator(rows, 50).get_page(request.GET.get("page"))
+    page.object_list = [decorate_report_row(row) for row in page.object_list]
+    placement_options = PublisherPlacement.objects.select_related("publisher")
+    if publisher_id:
+        placement_options = placement_options.filter(publisher__public_id=publisher_id)
+    context = _admin_base_context(account, "reports")
+    context.update(
+        {
+            "page": page,
+            "report_summary": summary,
+            "report_currency_rows": currency_rows,
+            "filters": filters,
+            "report_query": urlencode(filters),
+            "publishers": Publisher.objects.order_by("name"),
+            "placements": placement_options.order_by("publisher__name", "website_name"),
+            "countries": WallVisit.objects.exclude(country_code="")
+            .values_list("country_code", flat=True)
+            .distinct()
+            .order_by("country_code"),
+        }
+    )
+    return _no_store(render(request, "offerwall/admin_reports.html", context))
 
 
 @require_GET
@@ -3201,6 +3542,48 @@ def publisher_placement_event_postback_action(request, placement_id, postback_id
     return _no_store(HttpResponseRedirect(f"{destination}#postback"))
 
 
+def _test_placement_postback_connection(placement):
+    """Send the same signed test event from supplier and admin placement controls."""
+    if not placement.postback_enabled or not placement.postback_url:
+        return False, "Enable postbacks and save a URL before testing."
+    payload = {
+        "app_id": placement.app_id,
+        "user_id": "test-user",
+        "offer_id": "test-offer",
+        "status": "1",
+        "reward_amount": "1.00",
+        "payout_amount": "1.00",
+        "transaction_id": f"test-{secrets.token_hex(8)}",
+        "event_id": "test-event",
+        "event": "test",
+    }
+    try:
+        signing_secret = decrypt_placement_postback_secret(placement)
+        callback_url = _render_postback_url(placement.postback_url, payload)
+        transaction_signature = hmac.new(
+            signing_secret.encode("utf-8"),
+            payload["transaction_id"].encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        callback_url = _validated_callback_url(
+            callback_url.replace("{SIG}", transaction_signature)
+        )
+        response = requests.get(
+            callback_url,
+            headers={"User-Agent": "RMWins-Offerwall-Test/1.0"},
+            timeout=settings.OFFERWALL_POSTBACK_TIMEOUT_SECONDS,
+            allow_redirects=False,
+        )
+        if 200 <= response.status_code < 300 and response.text.strip() == "1":
+            return True, 'Postback connection successful. Response body: "1".'
+        return (
+            False,
+            f'Postback must return body "1" (HTTP {response.status_code}).',
+        )
+    except Exception as exc:
+        return False, f"Postback test failed: {str(exc)[:180]}"
+
+
 @require_POST
 def publisher_placement_postback_test(request, placement_id):
     publisher, denied = _publisher_portal_or_response(request)
@@ -3209,46 +3592,8 @@ def publisher_placement_postback_test(request, placement_id):
     placement = get_object_or_404(
         PublisherPlacement, publisher=publisher, public_id=placement_id
     )
-    if not placement.postback_enabled or not placement.postback_url:
-        messages.error(request, "Enable postbacks and save a URL before testing.")
-    else:
-        payload = {
-            "app_id": placement.app_id,
-            "user_id": "test-user",
-            "offer_id": "test-offer",
-            "status": "1",
-            "reward_amount": "1.00",
-            "payout_amount": "1.00",
-            "transaction_id": f"test-{secrets.token_hex(8)}",
-            "event_id": "test-event",
-            "event": "test",
-        }
-        signing_secret = decrypt_placement_postback_secret(placement)
-        try:
-            callback_url = _render_postback_url(placement.postback_url, payload)
-            transaction_signature = hmac.new(
-                signing_secret.encode("utf-8"),
-                payload["transaction_id"].encode("utf-8"),
-                hashlib.sha256,
-            ).hexdigest()
-            callback_url = _validated_callback_url(
-                callback_url.replace("{SIG}", transaction_signature)
-            )
-            response = requests.get(
-                callback_url,
-                headers={"User-Agent": "RMWins-Offerwall-Test/1.0"},
-                timeout=settings.OFFERWALL_POSTBACK_TIMEOUT_SECONDS,
-                allow_redirects=False,
-            )
-            if 200 <= response.status_code < 300 and response.text.strip() == "1":
-                messages.success(request, "Postback connection successful. Response body: 1")
-            else:
-                messages.error(
-                    request,
-                    f'Postback must return body "1" (HTTP {response.status_code}).',
-                )
-        except Exception as exc:
-            messages.error(request, f"Postback test failed: {str(exc)[:180]}")
+    success, message = _test_placement_postback_connection(placement)
+    (messages.success if success else messages.error)(request, message)
     destination = reverse(
         "offerwall:publisher-placement-edit",
         kwargs={"placement_id": placement.public_id},
@@ -3702,6 +4047,13 @@ def _publisher_reports_response(request, publisher):
     if status != "all" and status not in allowed_statuses:
         status = "all"
     placement_id = str(request.GET.get("placement") or "all").strip()
+    country_value = str(request.GET.get("country") or "").strip()
+    country = (
+        country_value.upper()[:8]
+        if country_value and country_value.lower() != "all"
+        else "all"
+    )
+    survey_query = str(request.GET.get("survey") or "").strip()[:160]
     query = str(request.GET.get("q") or "").strip()[:160]
     conversions = OfferConversion.objects.filter(
         publisher=publisher,
@@ -3717,6 +4069,13 @@ def _publisher_reports_response(request, publisher):
             placement_id = "all"
         else:
             conversions = conversions.filter(placement__public_id=placement_uuid)
+    if country != "all":
+        conversions = conversions.filter(click__visit__country_code__iexact=country)
+    if survey_query:
+        conversions = conversions.filter(
+            Q(survey__local_id__icontains=survey_query)
+            | Q(survey__name__icontains=survey_query)
+        )
     if query:
         conversions = conversions.filter(
             Q(source_transaction_id__icontains=query)
@@ -3729,6 +4088,8 @@ def _publisher_reports_response(request, publisher):
         "q": query,
         "status": status,
         "placement": placement_id,
+        "country": country,
+        "survey": survey_query,
         "start": start_date.isoformat(),
         "end": end_date.isoformat(),
     }
@@ -3804,6 +4165,40 @@ def _publisher_reports_response(request, publisher):
     )
     decided = summary["approved"] + summary["rejected"] + summary["reversed"]
     summary["approval_rate"] = _admin_percentage(summary["approved"], decided)
+    traffic_clicks = OfferClick.objects.filter(
+        publisher=publisher,
+        created_at__gte=start_at,
+        created_at__lt=end_at,
+    )
+    if placement_id != "all":
+        traffic_clicks = traffic_clicks.filter(
+            visit__placement__public_id=placement_id
+        )
+    if country != "all":
+        traffic_clicks = traffic_clicks.filter(visit__country_code__iexact=country)
+    if survey_query:
+        traffic_clicks = traffic_clicks.filter(
+            Q(survey__local_id__icontains=survey_query)
+            | Q(survey__name__icontains=survey_query)
+        )
+    if query:
+        traffic_clicks = traffic_clicks.filter(
+            Q(external_user_id__icontains=query)
+            | Q(survey__local_id__icontains=query)
+            | Q(survey__name__icontains=query)
+        )
+    traffic_summary = traffic_clicks.aggregate(
+        clicks=Count("id"),
+        completes=Count(
+            "id",
+            filter=Q(status=SurveyAttempt.Status.COMPLETED, is_verified=True),
+        ),
+    )
+    summary["clicks"] = traffic_summary["clicks"]
+    summary["completes"] = traffic_summary["completes"]
+    summary["cvr"] = _admin_percentage(
+        traffic_summary["completes"], traffic_summary["clicks"]
+    )
     page = Paginator(conversions, 40).get_page(request.GET.get("page"))
     context = _supplier_portal_context(publisher, "reports")
     context.update(
@@ -3814,6 +4209,10 @@ def _publisher_reports_response(request, publisher):
             "report_query": urlencode(filters),
             "report_placements": publisher.placements.order_by("website_name", "name"),
             "report_status_choices": OfferConversion.Status.choices,
+            "report_countries": publisher.wall_visits.exclude(country_code="")
+            .values_list("country_code", flat=True)
+            .distinct()
+            .order_by("country_code"),
         }
     )
     return _no_store(render(request, "offerwall/publisher_reports.html", context))

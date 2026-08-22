@@ -10,7 +10,7 @@
   <article class="accent"><span>Total respondents</span><strong>{{ respondent_stats.total }}</strong><small>supplier-scoped identities</small></article>
   <article><span>Verified</span><strong>{{ respondent_stats.verified }}</strong><small>email-confirmed accounts</small></article>
   <article><span>Awaiting verification</span><strong>{{ respondent_stats.unverified }}</strong><small>not eligible for inventory</small></article>
-  <article><span>Banned</span><strong>{{ respondent_stats.banned }}</strong><small>blocked from new sessions</small></article>
+  <article><span>Banned</span><strong>{{ respondent_stats.banned }}</strong><small>{{ respondent_stats.flagged_page }} with signals on this page</small></article>
 </section>
 
 <section class="rmw-admin-card rmw-admin-filter-card">
@@ -24,7 +24,7 @@
 
 <section class="rmw-admin-card rmw-admin-table-card">
   <div class="rmw-admin-card-head"><div><span>Identity registry</span><h2>{{ page.paginator.count }} respondents</h2></div><small>PII is encrypted at rest</small></div>
-  <div class="rmw-admin-table-wrap"><table class="rmw-admin-operations-table"><thead><tr><th>Respondent</th><th>Profile</th><th>Supplier</th><th>Placement</th><th>Joined / active</th><th>Performance</th><th>Status</th><th>Control</th></tr></thead><tbody>
+  <div class="rmw-admin-table-wrap"><table class="rmw-admin-operations-table rmw-admin-respondent-table"><thead><tr><th>Respondent</th><th>Profile</th><th>Supplier</th><th>Placement</th><th>Joined / active</th><th>Performance</th><th>IP / device</th><th>Fraud signals</th><th>Status</th><th>Control</th></tr></thead><tbody>
     {% for respondent in page.object_list %}<tr>
       <td><strong>{{ respondent.full_name|default:'Name unavailable' }}</strong><small>{{ respondent.email|default:'Email unavailable' }}</small><code>{{ respondent.external_user_id }}</code></td>
       <td><strong>{{ respondent.age }} years</strong><small>{{ respondent.get_gender_display }}</small></td>
@@ -32,9 +32,11 @@
       <td><strong>{{ respondent.last_placement.website_name|default:'Direct wall' }}</strong><small>{{ respondent.last_placement.app_id|default:'No placement' }}</small></td>
       <td><strong>{{ respondent.joined_at|date:'d M Y' }}</strong><small>Last seen {{ respondent.last_activity_at|default:respondent.last_seen_at|timesince }} ago</small></td>
       <td><strong>{{ respondent.visit_count }} / {{ respondent.click_count }}</strong><small>visits / clicks · {{ respondent.completed_count }} completes</small></td>
+      <td><strong>{{ respondent.latest_device }}</strong><small title="Privacy-safe IP fingerprint">IP {{ respondent.latest_ip_label }} · {{ respondent.shared_ip_users }} IDs / 24h</small></td>
+      <td><strong>Risk {{ respondent.fraud_score }}/100</strong><small>{% for flag in respondent.fraud_flags %}{% if not forloop.first %} · {% endif %}{{ flag }}{% empty %}No active signals{% endfor %}</small></td>
       <td>{% if respondent.is_banned %}<span class="rmw-admin-status rejected">Banned</span><small>{{ respondent.ban_reason|default:'No reason recorded' }}</small>{% elif respondent.is_email_verified %}<span class="rmw-admin-status active">Verified</span><small>{{ respondent.email_verified_at|date:'d M Y, H:i' }}</small>{% else %}<span class="rmw-admin-status pending">Unverified</span>{% endif %}</td>
       <td><div class="rmw-admin-lifecycle-actions">{% if respondent.is_banned %}<form method="post">{% csrf_token %}<input type="hidden" name="respondent_id" value="{{ respondent.public_id }}"><input type="hidden" name="action" value="unban"><button type="submit" class="approve">Unban</button></form>{% else %}<form method="post" onsubmit="return confirm('Ban this respondent from new survey sessions?');">{% csrf_token %}<input type="hidden" name="respondent_id" value="{{ respondent.public_id }}"><input type="hidden" name="action" value="ban"><input type="text" name="reason" maxlength="255" placeholder="Reason"><button type="submit" class="reject">Ban</button></form>{% endif %}</div></td>
-    </tr>{% empty %}<tr><td colspan="8">No respondents match these filters.</td></tr>{% endfor %}
+    </tr>{% empty %}<tr><td colspan="10">No respondents match these filters.</td></tr>{% endfor %}
   </tbody></table></div>
   <nav class="rmw-admin-pagination">{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&amp;q={{ filters.q|urlencode }}&amp;publisher={{ filters.publisher }}&amp;status={{ filters.status }}">← Previous</a>{% else %}<span></span>{% endif %}<strong>{{ page.number }} / {{ page.paginator.num_pages }}</strong>{% if page.has_next %}<a href="?page={{ page.next_page_number }}&amp;q={{ filters.q|urlencode }}&amp;publisher={{ filters.publisher }}&amp;status={{ filters.status }}">Next →</a>{% else %}<span></span>{% endif %}</nav>
 </section>

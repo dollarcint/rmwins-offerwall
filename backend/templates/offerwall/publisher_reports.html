@@ -8,6 +8,8 @@
   </header>
 
   <div class="ow-result-stats ow-conversion-report-stats">
+    <article><span>Clicks</span><strong>{{ report_summary.clicks }}</strong><small>{{ report_summary.completes }} completes</small></article>
+    <article><span>CVR</span><strong>{{ report_summary.cvr }}%</strong><small>Selected traffic</small></article>
     <article><span>Conversions</span><strong>{{ report_summary.total }}</strong><small>Selected period</small></article>
     <article class="warning"><span>Pending rewards</span><strong>{{ portal_publisher.currency }} {{ report_summary.pending_value|floatformat:2 }}</strong><small>{{ report_summary.pending }} awaiting release</small></article>
     <article class="success"><span>Available rewards</span><strong>{{ portal_publisher.currency }} {{ report_summary.approved_value|floatformat:2 }}</strong><small>{{ report_summary.approved }} approved</small></article>
@@ -21,6 +23,8 @@
     <form method="get" class="ow-result-filters">
       <label class="search"><span>Search</span><input type="search" name="q" value="{{ report_filters.q }}" placeholder="Transaction, respondent or survey"></label>
       <label><span>Placement</span><select name="placement"><option value="all">All placements</option>{% for placement in report_placements %}<option value="{{ placement.public_id }}" {% if report_filters.placement == placement.public_id|stringformat:'s' %}selected{% endif %}>{{ placement.website_name }} · {{ placement.name }}</option>{% endfor %}</select></label>
+      <label><span>Country</span><select name="country"><option value="all">All countries</option>{% for country in report_countries %}<option value="{{ country }}" {% if report_filters.country == country %}selected{% endif %}>{{ country }}</option>{% endfor %}</select></label>
+      <label><span>Survey</span><input type="search" name="survey" value="{{ report_filters.survey }}" placeholder="Internal ID or name"></label>
       <label><span>Status</span><select name="status"><option value="all" {% if report_filters.status == 'all' %}selected{% endif %}>All states</option>{% for value,label in report_status_choices %}<option value="{{ value }}" {% if report_filters.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
       <label><span>From</span><input type="date" name="start" value="{{ report_filters.start }}"></label><label><span>To</span><input type="date" name="end" value="{{ report_filters.end }}"></label>
       <div class="actions"><button type="submit">Apply filters</button><a href="{% url 'offerwall:publisher-section' 'reports' %}">Clear</a></div>
@@ -34,7 +38,7 @@
         <td>{% if conversion.placement %}<strong>{{ conversion.placement.name }}</strong><small>{{ conversion.placement.app_id }}</small>{% else %}<strong>Direct wall</strong><small>No placement</small>{% endif %}</td>
         <td><strong>{{ conversion.survey.name|default:'Untitled survey' }}</strong><code>{{ conversion.survey.local_id }}</code></td>
         <td><span class="ow-result-status conversion-{{ conversion.status }}">{{ conversion.get_status_display }}</span>{% if conversion.decision_reason %}<small title="{{ conversion.decision_reason }}">{{ conversion.decision_reason|truncatechars:54 }}</small>{% endif %}</td>
-        <td><strong class="ow-result-money">{{ conversion.currency }} {{ conversion.supplier_amount|floatformat:2 }}</strong><small>Source {{ conversion.source_amount|floatformat:2 }}</small></td>
+        <td><strong class="ow-result-money">{{ conversion.currency }} {{ conversion.supplier_amount|floatformat:2 }}</strong><small>Supplier reward snapshot</small></td>
         <td><strong>Risk {{ conversion.risk_score }}/100</strong><small>{% if conversion.requires_manual_review %}Manual review{% elif conversion.hold_until %}Until {{ conversion.hold_until|date:'d M H:i' }}{% else %}No hold{% endif %}</small></td>
       </tr>{% empty %}<tr><td colspan="8" class="ow-result-empty"><strong>No conversions found</strong><span>Try a wider date range or clear the filters.</span></td></tr>{% endfor %}
       </tbody>

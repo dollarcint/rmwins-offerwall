@@ -1,0 +1,29 @@
+{% extends 'offerwall/admin_base.html' %}
+{% block title %}Reports · RM Wins Admin{% endblock %}
+{% block page_name %}Reports{% endblock %}
+{% block content %}
+<section class="rmw-admin-page-heading"><div><p class="rmw-admin-kicker">Financial analytics</p><h1>Offerwall performance reports</h1><p>Reconcile traffic, conversions and immutable conversion economics across every supplier and placement.</p></div><a class="rmw-admin-primary-action rmw-admin-export-action" href="?{{ report_query }}&amp;export=csv">Export CSV</a></section>
+
+<section class="rmw-admin-metric-grid rmw-admin-report-metrics">
+  <article class="primary"><span>Clicks</span><strong>{{ report_summary.clicks }}</strong><small>{{ report_summary.completes }} verified completes</small></article>
+  <article><span>CVR</span><strong>{{ report_summary.cvr }}%</strong><small>complete / click</small></article>
+  <article><span>Revenue</span><strong>{% for item in report_currency_rows %}{% if not forloop.first %} · {% endif %}{{ item.publisher__currency }} {{ item.revenue|floatformat:2 }}{% empty %}—{% endfor %}</strong><small>pending + approved source value</small></article>
+  <article><span>Supplier payout</span><strong>{% for item in report_currency_rows %}{% if not forloop.first %} · {% endif %}{{ item.publisher__currency }} {{ item.payout|floatformat:2 }}{% empty %}—{% endfor %}</strong><small>immutable conversion snapshots</small></article>
+  <article class="margin"><span>RM Wins margin</span><strong>{% for item in report_currency_rows %}{% if not forloop.first %} · {% endif %}{{ item.publisher__currency }} {{ item.margin|floatformat:2 }}{% empty %}—{% endfor %}</strong><small>revenue minus supplier payout</small></article>
+</section>
+
+<section class="rmw-admin-card rmw-admin-filter-card">
+  <form method="get" class="rmw-admin-filter-grid rmw-admin-report-filters">
+    <label class="wide"><span>Search</span><input type="search" name="q" value="{{ filters.q }}" placeholder="Respondent, supplier, placement or survey"></label>
+    <label><span>Supplier</span><select name="publisher"><option value="">All suppliers</option>{% for item in publishers %}<option value="{{ item.public_id }}" {% if filters.publisher == item.public_id|stringformat:'s' %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
+    <label><span>Placement</span><select name="placement"><option value="">All placements</option>{% for item in placements %}<option value="{{ item.public_id }}" {% if filters.placement == item.public_id|stringformat:'s' %}selected{% endif %}>{{ item.publisher.name }} · {{ item.website_name }}</option>{% endfor %}</select></label>
+    <label><span>Country</span><select name="country"><option value="">All countries</option>{% for item in countries %}<option value="{{ item }}" {% if filters.country == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+    <label><span>Survey</span><input type="search" name="survey" value="{{ filters.survey }}" placeholder="ID or name"></label>
+    <label><span>From</span><input type="date" name="start" value="{{ filters.start }}"></label>
+    <label><span>To</span><input type="date" name="end" value="{{ filters.end }}"></label>
+    <button type="submit">Apply</button><a href="{% url 'offerwall:admin-reports' %}">Reset</a>
+  </form>
+</section>
+
+<section class="rmw-admin-card rmw-admin-table-card"><div class="rmw-admin-card-head"><div><span>Daily performance ledger</span><h2>{{ page.paginator.count }} grouped rows</h2></div><small>Maximum report window: 366 days</small></div><div class="rmw-admin-table-wrap"><table class="rmw-admin-report-table"><thead><tr><th>Date</th><th>Supplier / placement</th><th>Market</th><th>Survey</th><th>Clicks</th><th>Completes</th><th>CVR</th><th>Revenue</th><th>Payout</th><th>Margin</th></tr></thead><tbody>{% for row in page.object_list %}<tr><td><strong>{{ row.day|date:'d M Y' }}</strong></td><td><strong>{{ row.publisher__name }}</strong><small>{{ row.visit__placement__website_name|default:'Direct wall' }}</small></td><td><span class="rmw-admin-country-code">{{ row.visit__country_code|default:'—' }}</span></td><td><strong>{{ row.survey__local_id }}</strong><small>{{ row.survey__name|default:'Untitled survey'|truncatechars:42 }}</small></td><td>{{ row.clicks }}</td><td>{{ row.completes }}</td><td>{{ row.cvr }}%</td><td><strong>{{ row.publisher__currency }} {{ row.revenue|floatformat:2 }}</strong></td><td>{{ row.publisher__currency }} {{ row.payout|floatformat:2 }}</td><td><strong>{{ row.publisher__currency }} {{ row.margin|floatformat:2 }}</strong></td></tr>{% empty %}<tr><td colspan="10">No report data matches these filters.</td></tr>{% endfor %}</tbody></table></div><nav class="rmw-admin-pagination">{% if page.has_previous %}<a href="?{{ report_query }}&amp;page={{ page.previous_page_number }}">← Previous</a>{% else %}<span></span>{% endif %}<strong>{{ page.number }} / {{ page.paginator.num_pages }}</strong>{% if page.has_next %}<a href="?{{ report_query }}&amp;page={{ page.next_page_number }}">Next →</a>{% else %}<span></span>{% endif %}</nav></section>
+{% endblock %}

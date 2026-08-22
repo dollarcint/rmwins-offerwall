@@ -638,6 +638,7 @@ class OfferwallFlowTests(TestCase):
         self.assertContains(dashboard, "Offerwall performance")
         self.assertContains(dashboard, reverse("offerwall:admin-inventory"))
         self.assertContains(dashboard, reverse("offerwall:admin-suppliers"))
+        self.assertContains(dashboard, reverse("offerwall:admin-reports"))
         self.assertContains(dashboard, reverse("offerwall:admin-activity"))
 
     def test_offerwall_admin_login_rejects_supplier_and_unregistered_staff_accounts(self):
@@ -710,6 +711,22 @@ class OfferwallFlowTests(TestCase):
                 "updated_at",
             ]
         )
+        click.visit.country_code = "US"
+        click.visit.save(update_fields=["country_code"])
+        OfferConversion.objects.create(
+            click=click,
+            publisher=self.publisher,
+            placement=click.visit.placement,
+            survey=self.survey,
+            external_user_id=click.external_user_id,
+            source_transaction_id="admin-report-transaction",
+            source_reference_id="admin-report-reference",
+            source_amount=Decimal("5.00"),
+            supplier_amount=Decimal("3.50"),
+            currency=self.publisher.currency,
+            status=OfferConversion.Status.APPROVED,
+            approved_at=timezone.now(),
+        )
 
         dashboard = self.client.get(reverse("offerwall:admin-dashboard"), {"range": "30d"})
         self.assertEqual(dashboard.status_code, 200)
@@ -744,6 +761,28 @@ class OfferwallFlowTests(TestCase):
         activity = self.client.get(reverse("offerwall:admin-activity"))
         self.assertEqual(activity.status_code, 200)
         self.assertContains(activity, "Offer activity")
+
+        reports = self.client.get(
+            reverse("offerwall:admin-reports"),
+            {"country": "US", "survey": self.survey.local_id},
+        )
+        self.assertEqual(reports.status_code, 200)
+        self.assertEqual(reports.context["report_summary"]["clicks"], 1)
+        self.assertEqual(reports.context["report_summary"]["completes"], 1)
+        self.assertEqual(reports.context["report_summary"]["revenue"], Decimal("5.00"))
+        self.assertEqual(reports.context["report_summary"]["payout"], Decimal("3.50"))
+        self.assertEqual(reports.context["report_summary"]["margin"], Decimal("1.50"))
+        self.assertContains(reports, self.survey.local_id)
+        report_csv = self.client.get(
+            reverse("offerwall:admin-reports"),
+            {"country": "US", "export": "csv"},
+        )
+        self.assertEqual(report_csv.status_code, 200)
+        self.assertEqual(report_csv["Content-Type"], "text/csv; charset=utf-8")
+        report_payload = b"".join(report_csv.streaming_content).decode("utf-8")
+        self.assertIn("Supplier payout", report_payload)
+        self.assertIn("Margin", report_payload)
+        self.assertIn(self.survey.local_id, report_payload)
 
     def test_admin_inventory_controls_global_and_supplier_offer_rules(self):
         admin_user = get_user_model().objects.create_user(
@@ -1207,6 +1246,16 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(placement.allowed_device_types, ["Desktop", "Mobile"])
         self.assertTrue(placement.postback_enabled)
         self.assertIn("{SID}", placement.postback_url)
+        with patch(
+            "offerwall.views._test_placement_postback_connection",
+            return_value=(True, "Postback connection successful."),
+        ) as test_connection:
+            tested = self.client.post(
+                placement_detail_url,
+                {"form_type": "test-postback"},
+            )
+        self.assertEqual(tested.status_code, 302)
+        test_connection.assert_called_once_with(placement)
 
         supplier_detail = self.client.get(
             reverse(
@@ -1235,6 +1284,9 @@ class OfferwallFlowTests(TestCase):
         )
         self.assertContains(respondent_page, "admin-audience-user")
         self.assertContains(respondent_page, "audience-user@example.test")
+        self.assertContains(respondent_page, "Fraud signals")
+        self.assertContains(respondent_page, "IP / device")
+        self.assertContains(respondent_page, "Risk")
         self.client.post(
             reverse("offerwall:admin-respondents"),
             {
@@ -2214,6 +2266,37 @@ class OfferwallFlowTests(TestCase):
         self.assertContains(response, "Conversion reports")
         self.assertContains(response, "Financial conversion ledger")
         self.assertContains(response, "Placements")
+
+    def test_supplier_conversion_reports_filter_traffic_and_hide_source_value(self):
+        click = self._credit_click()
+        click.visit.country_code = "US"
+        click.visit.save(update_fields=["country_code"])
+        self._open_supplier_session(suffix="conversion-reports")
+        reports_url = reverse(
+            "offerwall:publisher-section", kwargs={"section": "reports"}
+        )
+        response = self.client.get(
+            reports_url,
+            {"country": "US", "survey": self.survey.local_id},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["report_summary"]["clicks"], 1)
+        self.assertEqual(response.context["report_summary"]["completes"], 1)
+        self.assertEqual(response.context["report_summary"]["total"], 1)
+        self.assertContains(response, "Supplier reward snapshot")
+        self.assertNotContains(response, "Source 5.00")
+
+        empty_market = self.client.get(reports_url, {"country": "IN"})
+        self.assertEqual(empty_market.context["report_summary"]["clicks"], 0)
+        self.assertEqual(empty_market.context["report_summary"]["total"], 0)
+
+        exported = self.client.get(
+            reports_url,
+            {"country": "US", "survey": self.survey.local_id, "export": "csv"},
+        )
+        payload = b"".join(exported.streaming_content).decode("utf-8")
+        self.assertIn("Supplier amount", payload)
+        self.assertNotIn("Source amount", payload)
 
     def test_supplier_survey_results_are_filterable_and_show_clean_outcomes(self):
         self._open_supplier_session(suffix="survey-results")
