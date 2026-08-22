@@ -1,0 +1,45 @@
+{% extends 'offerwall/admin_base.html' %}
+{% block title %}Inventory · RM Wins Admin{% endblock %}
+{% block page_name %}Inventory{% endblock %}
+{% block content %}
+<section class="rmw-admin-page-heading">
+  <div><p class="rmw-admin-kicker">Survey operations</p><h1>Inventory control</h1><p>Search and inspect synchronized and manually-added offerwall surveys.</p></div>
+</section>
+
+<section class="rmw-admin-stat-grid rmw-admin-stat-grid-compact">
+  <article class="accent"><span>Live inventory</span><strong>{{ inventory_stats.live }}</strong><small>eligible surveys</small></article>
+  <article><span>Country coverage</span><strong>{{ inventory_stats.countries }}</strong><small>live markets</small></article>
+  <article><span>Available completes</span><strong>{{ inventory_stats.available_completes }}</strong><small>remaining quota</small></article>
+  <article><span>Average source CPI</span><strong>${{ inventory_stats.average_cpi|floatformat:2 }}</strong><small>across live inventory</small></article>
+</section>
+
+<section class="rmw-admin-card rmw-admin-filter-card">
+  <form method="get" class="rmw-admin-filter-grid">
+    <label class="wide"><span>Search inventory</span><input type="search" name="q" value="{{ filters.q }}" placeholder="Survey ID, name or provider"></label>
+    <label><span>Country</span><select name="country"><option value="">All countries</option>{% for item in countries %}<option value="{{ item }}" {% if filters.country == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+    <label><span>Provider</span><select name="provider"><option value="">All providers</option>{% for item in providers %}<option value="{{ item }}" {% if filters.provider == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+    <label><span>Status</span><select name="status"><option value="">All statuses</option><option value="live" {% if filters.status == 'live' %}selected{% endif %}>Live</option><option value="closed" {% if filters.status == 'closed' %}selected{% endif %}>Closed</option></select></label>
+    <button type="submit">Apply filters</button>
+    <a href="{% url 'offerwall:admin-inventory' %}">Reset</a>
+  </form>
+</section>
+
+<section class="rmw-admin-card rmw-admin-table-card">
+  <div class="rmw-admin-card-head"><div><span>Survey catalog</span><h2>{{ page.paginator.count }} matching surveys</h2></div><small>Page {{ page.number }} of {{ page.paginator.num_pages }}</small></div>
+  <div class="rmw-admin-table-wrap"><table><thead><tr><th>Survey</th><th>Provider</th><th>Country</th><th>Source CPI</th><th>Remaining</th><th>LOI</th><th>IR</th><th>Status</th><th>Updated</th></tr></thead><tbody>
+    {% for survey in page.object_list %}<tr>
+      <td><strong>{{ survey.local_id }}</strong><small>{{ survey.name|default:'Untitled survey'|truncatechars:48 }}</small></td>
+      <td><strong>{{ survey.company_name|default:'—' }}</strong><small>{{ survey.get_inventory_source_display }}</small></td>
+      <td><span class="rmw-admin-country-code">{{ survey.country_code|default:'—' }}</span><small>{{ survey.country|default:'' }}</small></td>
+      <td>{% if survey.cpi != None %}<strong>${{ survey.cpi|floatformat:2 }}</strong>{% else %}—{% endif %}</td>
+      <td>{{ survey.remaining }}</td><td>{% if survey.loi %}{{ survey.loi }} min{% else %}—{% endif %}</td><td>{% if survey.incidence_rate != None %}{{ survey.incidence_rate|floatformat:0 }}%{% else %}—{% endif %}</td>
+      <td><span class="rmw-admin-status {% if survey.status == 'live' %}active{% endif %}">{{ survey.get_status_display }}</span></td><td>{{ survey.updated_at|date:'d M Y, H:i' }}</td>
+    </tr>{% empty %}<tr><td colspan="9">No surveys match these filters.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <nav class="rmw-admin-pagination" aria-label="Inventory pages">
+    {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&q={{ filters.q|urlencode }}&country={{ filters.country|urlencode }}&provider={{ filters.provider|urlencode }}&status={{ filters.status|urlencode }}">← Previous</a>{% else %}<span></span>{% endif %}
+    <strong>{{ page.number }} / {{ page.paginator.num_pages }}</strong>
+    {% if page.has_next %}<a href="?page={{ page.next_page_number }}&q={{ filters.q|urlencode }}&country={{ filters.country|urlencode }}&provider={{ filters.provider|urlencode }}&status={{ filters.status|urlencode }}">Next →</a>{% else %}<span></span>{% endif %}
+  </nav>
+</section>
+{% endblock %}

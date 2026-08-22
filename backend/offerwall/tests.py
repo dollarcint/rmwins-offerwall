@@ -457,8 +457,10 @@ class OfferwallFlowTests(TestCase):
 
         dashboard = self.client.get(reverse("offerwall:admin-dashboard"))
         self.assertEqual(dashboard.status_code, 200)
-        self.assertContains(dashboard, "Live inventory")
-        self.assertContains(dashboard, "Suppliers &amp; current cuts")
+        self.assertContains(dashboard, "Offerwall performance")
+        self.assertContains(dashboard, reverse("offerwall:admin-inventory"))
+        self.assertContains(dashboard, reverse("offerwall:admin-suppliers"))
+        self.assertContains(dashboard, reverse("offerwall:admin-activity"))
 
     def test_offerwall_admin_login_rejects_supplier_and_unregistered_staff_accounts(self):
         supplier_user = get_user_model().objects.create_user(
@@ -502,7 +504,7 @@ class OfferwallFlowTests(TestCase):
                 fetch_redirect_response=False,
             )
 
-    def test_offerwall_admin_dashboard_shows_country_inventory_and_cut_snapshot(self):
+    def test_offerwall_admin_modules_show_inventory_activity_and_update_cut(self):
         admin_user = get_user_model().objects.create_user(
             username="dashboard-admin",
             password="Dashboard-Admin-9472",
@@ -516,14 +518,54 @@ class OfferwallFlowTests(TestCase):
             reverse("offerwall:admin-login"),
             {"username": admin_user.username, "password": "Dashboard-Admin-9472"},
         )
+        click = self._click()
+        click.status = SurveyAttempt.Status.COMPLETED
+        click.is_verified = True
+        click.source_cpi_snapshot = Decimal("5.00")
+        click.payout_snapshot = Decimal("3.50")
+        click.save(
+            update_fields=[
+                "status",
+                "is_verified",
+                "source_cpi_snapshot",
+                "payout_snapshot",
+                "updated_at",
+            ]
+        )
 
-        response = self.client.get(reverse("offerwall:admin-dashboard"))
+        dashboard = self.client.get(reverse("offerwall:admin-dashboard"), {"range": "30d"})
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertContains(dashboard, "Traffic trend")
+        self.assertContains(dashboard, "Country performance")
+        self.assertEqual(dashboard.context["dashboard_counts"]["clicks"], 1)
+        self.assertEqual(dashboard.context["dashboard_counts"]["completes"], 1)
+        self.assertEqual(dashboard.context["platform_margin"], Decimal("1.50"))
+        self.assertEqual(sum(row["clicks"] for row in dashboard.context["trend"]["rows"]), 1)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "US")
-        self.assertContains(response, "70.00%")
-        self.assertContains(response, "30.00%")
-        self.assertContains(response, "Recent offer activity")
+        inventory = self.client.get(reverse("offerwall:admin-inventory"), {"country": "US"})
+        self.assertEqual(inventory.status_code, 200)
+        self.assertContains(inventory, self.survey.local_id)
+        self.assertContains(inventory, "US")
+
+        suppliers = self.client.get(reverse("offerwall:admin-suppliers"))
+        self.assertEqual(suppliers.status_code, 200)
+        self.assertContains(suppliers, "70.00")
+        self.assertContains(suppliers, "30.00%")
+        changed = self.client.post(
+            reverse("offerwall:admin-suppliers"),
+            {"publisher_id": self.publisher.public_id, "payout_percent": "65.50"},
+        )
+        self.assertRedirects(
+            changed,
+            reverse("offerwall:admin-suppliers"),
+            fetch_redirect_response=False,
+        )
+        self.publisher.refresh_from_db()
+        self.assertEqual(self.publisher.payout_percent, Decimal("65.50"))
+
+        activity = self.client.get(reverse("offerwall:admin-activity"))
+        self.assertEqual(activity.status_code, 200)
+        self.assertContains(activity, "Offer activity")
 
     def test_supplier_registration_creates_pending_inactive_account(self):
         response = self.client.post(

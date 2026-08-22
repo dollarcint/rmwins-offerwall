@@ -7,7 +7,7 @@
   <meta name="color-scheme" content="light">
   <title>{% block title %}RM Wins Admin{% endblock %}</title>
   {% include 'includes/favicon_links.html' %}
-  <link rel="stylesheet" href="{% static 'offerwall/admin_portal.css' %}?v=1">
+  <link rel="stylesheet" href="{% static 'offerwall/admin_portal.css' %}?v=2">
 </head>
 <body class="rmw-admin-body">
   <div class="rmw-admin-app">
@@ -17,10 +17,10 @@
         <span><strong>RM Wins</strong><small>Administration</small></span>
       </a>
       <nav aria-label="Admin navigation">
-        <a class="active" href="{% url 'offerwall:admin-dashboard' %}"><span>▦</span>Dashboard</a>
-        <a href="{% url 'offerwall:admin-dashboard' %}#inventory"><span>◫</span>Inventory</a>
-        <a href="{% url 'offerwall:admin-dashboard' %}#suppliers"><span>◎</span>Suppliers &amp; cuts</a>
-        <a href="{% url 'offerwall:admin-dashboard' %}#activity"><span>↗</span>Recent activity</a>
+        <a class="{% if admin_active_page == 'dashboard' %}active{% endif %}" href="{% url 'offerwall:admin-dashboard' %}"><span>▦</span>Dashboard</a>
+        <a class="{% if admin_active_page == 'inventory' %}active{% endif %}" href="{% url 'offerwall:admin-inventory' %}"><span>◫</span>Inventory</a>
+        <a class="{% if admin_active_page == 'suppliers' %}active{% endif %}" href="{% url 'offerwall:admin-suppliers' %}"><span>◎</span>Suppliers &amp; cuts</a>
+        <a class="{% if admin_active_page == 'activity' %}active{% endif %}" href="{% url 'offerwall:admin-activity' %}"><span>↗</span>Activity</a>
       </nav>
       <div class="rmw-admin-sidebar-foot">
         <a href="{% url 'offerwall:admin-password-change' %}">Change password</a>

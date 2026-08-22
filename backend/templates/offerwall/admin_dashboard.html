@@ -1,53 +1,82 @@
 {% extends 'offerwall/admin_base.html' %}
 {% block title %}Dashboard · RM Wins Admin{% endblock %}
-{% block page_name %}Executive dashboard{% endblock %}
+{% block page_name %}Analytics dashboard{% endblock %}
 {% block content %}
-<section class="rmw-admin-page-heading">
-  <div><p class="rmw-admin-kicker">Live platform overview</p><h1>Good to see you, {{ admin_account.user.username }}.</h1><p>Monitor inventory coverage, supplier delivery and verified activity from one place.</p></div>
-  <span class="rmw-admin-live"><i></i>Production live</span>
+<section class="rmw-admin-page-heading rmw-admin-heading-actions">
+  <div><p class="rmw-admin-kicker">Platform intelligence</p><h1>Offerwall performance</h1><p>Verified traffic, revenue and supplier quality in one operational view.</p></div>
+  <form class="rmw-admin-period" method="get" aria-label="Reporting period">
+    {% for key, label in range_options %}<button type="submit" name="range" value="{{ key }}" class="{% if selected_range == key %}active{% endif %}">{{ key|upper }}</button>{% endfor %}
+  </form>
 </section>
 
-<section class="rmw-admin-stat-grid" aria-label="Platform statistics">
-  <article class="accent"><span>Live inventory</span><strong>{{ dashboard_counts.live_inventory }}</strong><small>eligible surveys</small></article>
-  <article><span>Country coverage</span><strong>{{ dashboard_counts.countries }}</strong><small>active markets</small></article>
-  <article><span>Approved suppliers</span><strong>{{ dashboard_counts.approved_suppliers }}</strong><small>{{ dashboard_counts.pending_suppliers }} awaiting review</small></article>
-  <article><span>Active placements</span><strong>{{ dashboard_counts.active_placements }}</strong><small>publisher integrations</small></article>
+<section class="rmw-admin-metric-grid" aria-label="Performance indicators">
+  <article class="primary"><span>Total clicks</span><strong>{{ dashboard_counts.clicks }}</strong><small>{{ dashboard_counts.click_rate }}% of wall visits</small></article>
+  <article><span>Verified completes</span><strong>{{ dashboard_counts.completes }}</strong><small>{{ dashboard_counts.conversion_rate }}% conversion rate</small></article>
+  <article><span>Source revenue</span><strong>${{ source_value|floatformat:2 }}</strong><small>${{ average_source_cpi|floatformat:2 }} average CPI</small></article>
+  <article class="margin"><span>RM Wins margin</span><strong>${{ platform_margin|floatformat:2 }}</strong><small>after ${{ supplier_value|floatformat:2 }} supplier payout</small></article>
+  <article><span>Wall visits</span><strong>{{ dashboard_counts.visits }}</strong><small>{{ range_label }}</small></article>
+  <article><span>Unique respondents</span><strong>{{ dashboard_counts.unique_respondents }}</strong><small>attributed publisher users</small></article>
+  <article><span>Live inventory</span><strong>{{ dashboard_counts.live_inventory }}</strong><small>eligible surveys now</small></article>
+  <article><span>Active suppliers</span><strong>{{ dashboard_counts.active_suppliers }}</strong><small>enabled traffic partners</small></article>
 </section>
 
-<section class="rmw-admin-performance-grid">
-  <article class="rmw-admin-card rmw-admin-traffic-card">
-    <div class="rmw-admin-card-head"><div><span>Last 24 hours</span><h2>Traffic pulse</h2></div><span class="rmw-admin-chip">Live</span></div>
-    <div class="rmw-admin-pulse">
-      <div><strong>{{ dashboard_counts.visits_24h }}</strong><span>Visits</span></div>
-      <i></i><div><strong>{{ dashboard_counts.clicks_24h }}</strong><span>Clicks</span></div>
-      <i></i><div><strong>{{ dashboard_counts.completes_24h }}</strong><span>Verified completes</span></div>
+<section class="rmw-admin-dashboard-grid rmw-admin-dashboard-grid-wide">
+  <article class="rmw-admin-card rmw-admin-chart-card">
+    <div class="rmw-admin-card-head"><div><span>Traffic trend</span><h2>Visits, clicks &amp; verified completes</h2></div><small>{{ range_label }}</small></div>
+    <div class="rmw-admin-chart-legend"><span class="visit">Visits</span><span class="click">Clicks</span><span class="complete">Completes</span></div>
+    <div class="rmw-admin-line-chart">
+      <svg viewBox="0 0 1000 220" preserveAspectRatio="none" role="img" aria-label="Traffic trend chart">
+        <line x1="0" y1="14" x2="1000" y2="14"></line><line x1="0" y1="69" x2="1000" y2="69"></line><line x1="0" y1="124" x2="1000" y2="124"></line><line x1="0" y1="206" x2="1000" y2="206"></line>
+        <polyline class="visit-line" points="{{ trend.traffic_visit_points }}"></polyline>
+        <polyline class="click-line" points="{{ trend.traffic_click_points }}"></polyline>
+        <polyline class="complete-line" points="{{ trend.traffic_complete_points }}"></polyline>
+      </svg>
+      <div class="rmw-admin-chart-labels">{% for item in trend.rows %}<span>{% if item.show_label %}{{ item.label }}{% endif %}</span>{% endfor %}</div>
     </div>
   </article>
-  <article class="rmw-admin-card rmw-admin-margin-card">
-    <div class="rmw-admin-card-head"><div><span>Verified value · 24h</span><h2>Platform margin</h2></div></div>
-    <strong>${{ platform_margin_24h|floatformat:2 }}</strong>
-    <div><span>Source ${{ source_value_24h|floatformat:2 }}</span><span>Supplier ${{ supplier_value_24h|floatformat:2 }}</span></div>
+
+  <article class="rmw-admin-card rmw-admin-outcome-card">
+    <div class="rmw-admin-card-head"><div><span>Journey outcomes</span><h2>Click disposition</h2></div><small>{{ outcome_total }} outcomes</small></div>
+    <div class="rmw-admin-donut-wrap">
+      <div class="rmw-admin-donut" style="background:conic-gradient({{ outcome_donut }});"><span><strong>{{ dashboard_counts.conversion_rate }}%</strong><small>CVR</small></span></div>
+      <div class="rmw-admin-outcome-list">
+        {% for row in outcome_rows %}<div><i style="background:{{ row.color }}"></i><span>{{ row.label }}</span><strong>{{ row.total }}</strong><small>{{ row.percentage }}%</small></div>{% empty %}<p>No click outcomes in this period.</p>{% endfor %}
+      </div>
+    </div>
   </article>
 </section>
 
-<section class="rmw-admin-card rmw-admin-table-card" id="inventory">
-  <div class="rmw-admin-card-head"><div><span>Inventory</span><h2>Country availability</h2></div><small>Top markets by live survey count</small></div>
-  <div class="rmw-admin-table-wrap"><table><thead><tr><th>Country</th><th>Live surveys</th><th>Available completes</th><th>Average source CPI</th></tr></thead><tbody>
-    {% for item in country_inventory %}<tr><td><strong>{{ item.country_code }}</strong></td><td>{{ item.survey_count }}</td><td>{{ item.available_completes }}</td><td>${{ item.average_cpi|floatformat:2 }}</td></tr>{% empty %}<tr><td colspan="4">No live country inventory.</td></tr>{% endfor %}
-  </tbody></table></div>
+<section class="rmw-admin-dashboard-grid">
+  <article class="rmw-admin-card rmw-admin-chart-card">
+    <div class="rmw-admin-card-head"><div><span>Commercial trend</span><h2>Revenue, payout &amp; margin</h2></div><small>USD · verified completes</small></div>
+    <div class="rmw-admin-chart-legend"><span class="revenue">Source revenue</span><span class="payout">Supplier payout</span><span class="margin-key">RM Wins margin</span></div>
+    <div class="rmw-admin-line-chart compact">
+      <svg viewBox="0 0 1000 220" preserveAspectRatio="none" role="img" aria-label="Revenue trend chart">
+        <line x1="0" y1="14" x2="1000" y2="14"></line><line x1="0" y1="69" x2="1000" y2="69"></line><line x1="0" y1="124" x2="1000" y2="124"></line><line x1="0" y1="206" x2="1000" y2="206"></line>
+        <polyline class="revenue-line" points="{{ trend.revenue_source_points }}"></polyline>
+        <polyline class="payout-line" points="{{ trend.revenue_supplier_points }}"></polyline>
+        <polyline class="margin-line" points="{{ trend.revenue_margin_points }}"></polyline>
+      </svg>
+      <div class="rmw-admin-chart-labels">{% for item in trend.rows %}<span>{% if item.show_label %}{{ item.label }}{% endif %}</span>{% endfor %}</div>
+    </div>
+  </article>
+
+  <article class="rmw-admin-card rmw-admin-country-card">
+    <div class="rmw-admin-card-head"><div><span>Geography</span><h2>Country performance</h2></div><small>Top traffic markets</small></div>
+    <div class="rmw-admin-country-list">
+      {% for row in country_rows %}<div class="rmw-admin-country-row">
+        <div><strong>{{ row.country_code }}</strong><small>{{ row.clicks }} clicks · {{ row.completes }} complete</small></div>
+        <div class="rmw-admin-country-track"><i style="width:{{ row.bar_percent }}%"></i></div>
+        <span>{{ row.conversion_rate }}%</span>
+      </div>{% empty %}<p class="rmw-admin-empty">No country-attributed traffic in this period.</p>{% endfor %}
+    </div>
+  </article>
 </section>
 
-<section class="rmw-admin-card rmw-admin-table-card" id="suppliers">
-  <div class="rmw-admin-card-head"><div><span>Commercial controls</span><h2>Suppliers &amp; current cuts</h2></div><small>Editable cut controls are the next module in this portal</small></div>
-  <div class="rmw-admin-table-wrap"><table><thead><tr><th>Supplier</th><th>Status</th><th>Placements</th><th>Respondents</th><th>Supplier payout</th><th>RM Wins cut</th></tr></thead><tbody>
-    {% for publisher in publishers %}<tr><td><strong>{{ publisher.name }}</strong><small>#{{ publisher.publisher_code }}</small></td><td><span class="rmw-admin-status {% if publisher.is_active %}active{% endif %}">{{ publisher.is_active|yesno:'Active,Inactive' }}</span></td><td>{{ publisher.placement_count }}</td><td>{{ publisher.respondent_count }}</td><td>{{ publisher.payout_percent|floatformat:2 }}%</td><td><strong>{{ publisher.platform_cut_percent|floatformat:2 }}%</strong></td></tr>{% empty %}<tr><td colspan="6">No suppliers registered.</td></tr>{% endfor %}
-  </tbody></table></div>
-</section>
-
-<section class="rmw-admin-card rmw-admin-table-card" id="activity">
-  <div class="rmw-admin-card-head"><div><span>Audit stream</span><h2>Recent offer activity</h2></div><small>Latest attributed clicks</small></div>
-  <div class="rmw-admin-table-wrap"><table><thead><tr><th>Respondent</th><th>Supplier</th><th>Survey</th><th>Country</th><th>Status</th><th>Created</th></tr></thead><tbody>
-    {% for click in recent_clicks %}<tr><td><strong>{{ click.external_user_id }}</strong></td><td>{{ click.publisher.name }}</td><td><small>{{ click.survey.local_id }}</small>{{ click.survey.name|default:'Untitled survey'|truncatechars:35 }}</td><td>{{ click.visit.country_code|default:'—' }}</td><td><span class="rmw-admin-status {{ click.status }}">{{ click.status|title }}</span></td><td>{{ click.created_at|date:'d M, H:i' }}</td></tr>{% empty %}<tr><td colspan="6">No click activity yet.</td></tr>{% endfor %}
+<section class="rmw-admin-card rmw-admin-table-card">
+  <div class="rmw-admin-card-head"><div><span>Partner quality</span><h2>Top suppliers</h2></div><a class="rmw-admin-text-link" href="{% url 'offerwall:admin-suppliers' %}">Manage cuts →</a></div>
+  <div class="rmw-admin-table-wrap"><table><thead><tr><th>Supplier</th><th>Publisher ID</th><th>Clicks</th><th>Completes</th><th>Conversion</th><th>Payout</th></tr></thead><tbody>
+    {% for row in supplier_rows %}<tr><td><strong>{{ row.publisher__name }}</strong></td><td>#{{ row.publisher__publisher_number }}</td><td>{{ row.clicks }}</td><td>{{ row.completes }}</td><td>{{ row.conversion_rate }}%</td><td><strong>${{ row.payout|floatformat:2 }}</strong></td></tr>{% empty %}<tr><td colspan="6">No supplier activity in this period.</td></tr>{% endfor %}
   </tbody></table></div>
 </section>
 {% endblock %}

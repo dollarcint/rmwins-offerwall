@@ -22,7 +22,7 @@ from django.core.cache import caches
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Avg, Count, DecimalField, Max, Prefetch, Q, Sum, Value
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, TruncDay, TruncHour
 from django.core.paginator import Paginator
 from django.http import (
     FileResponse,
@@ -452,85 +452,427 @@ def admin_portal_password_change(request):
     )
 
 
+ADMIN_REPORT_RANGES = {
+    "24h": (timedelta(hours=24), "Last 24 hours"),
+    "7d": (timedelta(days=7), "Last 7 days"),
+    "30d": (timedelta(days=30), "Last 30 days"),
+}
+
+
+def _admin_base_context(account, active_page):
+    OfferwallAdminPortalAccount.objects.filter(pk=account.pk).update(
+        last_seen_at=timezone.now()
+    )
+    return {"admin_account": account, "admin_active_page": active_page}
+
+
+def _admin_percentage(numerator, denominator):
+    if not denominator:
+        return Decimal("0.00")
+    return (Decimal(numerator) * Decimal("100") / Decimal(denominator)).quantize(
+        Decimal("0.01")
+    )
+
+
+def _admin_chart_points(rows, field, maximum, *, width=1000, height=220):
+    if not rows:
+        return ""
+    usable_height = height - 28
+    denominator = max(len(rows) - 1, 1)
+    points = []
+    for index, row in enumerate(rows):
+        x = round(index * width / denominator, 1)
+        value = float(row.get(field) or 0)
+        y = round(height - 14 - ((value / maximum) * usable_height if maximum else 0), 1)
+        points.append(f"{x},{y}")
+    return " ".join(points)
+
+
+def _admin_dashboard_trend(*, since, range_key):
+    truncator = (
+        TruncHour("created_at", tzinfo=datetime_timezone.utc)
+        if range_key == "24h"
+        else TruncDay("created_at", tzinfo=datetime_timezone.utc)
+    )
+    visit_rows = {
+        row["bucket"]: row["total"]
+        for row in WallVisit.objects.filter(created_at__gte=since)
+        .annotate(bucket=truncator)
+        .values("bucket")
+        .annotate(total=Count("id"))
+        .order_by("bucket")
+    }
+    click_rows = {
+        row["bucket"]: row
+        for row in OfferClick.objects.filter(created_at__gte=since)
+        .annotate(bucket=truncator)
+        .values("bucket")
+        .annotate(
+            clicks=Count("id"),
+            completes=Count(
+                "id",
+                filter=Q(
+                    status=SurveyAttempt.Status.COMPLETED,
+                    is_verified=True,
+                ),
+            ),
+            source_value=Coalesce(
+                Sum(
+                    "source_cpi_snapshot",
+                    filter=Q(
+                        status=SurveyAttempt.Status.COMPLETED,
+                        is_verified=True,
+                    ),
+                ),
+                Value(Decimal("0.00")),
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            ),
+            supplier_value=Coalesce(
+                Sum(
+                    "payout_snapshot",
+                    filter=Q(
+                        status=SurveyAttempt.Status.COMPLETED,
+                        is_verified=True,
+                    ),
+                ),
+                Value(Decimal("0.00")),
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            ),
+        )
+        .order_by("bucket")
+    }
+    if range_key == "24h":
+        start = since.replace(minute=0, second=0, microsecond=0)
+        bucket_count = 25
+        step = timedelta(hours=1)
+        label_format = "%H:%M"
+    else:
+        start = since.replace(hour=0, minute=0, second=0, microsecond=0)
+        bucket_count = 8 if range_key == "7d" else 31
+        step = timedelta(days=1)
+        label_format = "%d %b"
+    rows = []
+    for index in range(bucket_count):
+        bucket = start + (step * index)
+        clicks = click_rows.get(bucket, {})
+        source_value = clicks.get("source_value") or Decimal("0.00")
+        supplier_value = clicks.get("supplier_value") or Decimal("0.00")
+        rows.append(
+            {
+                "label": timezone.localtime(bucket).strftime(label_format),
+                "visits": visit_rows.get(bucket, 0),
+                "clicks": clicks.get("clicks", 0),
+                "completes": clicks.get("completes", 0),
+                "source_value": source_value,
+                "supplier_value": supplier_value,
+                "margin": source_value - supplier_value,
+            }
+        )
+    traffic_max = max(
+        [max(row["visits"], row["clicks"], row["completes"]) for row in rows]
+        or [0]
+    )
+    revenue_max = max(
+        [float(max(row["source_value"], row["supplier_value"], row["margin"])) for row in rows]
+        or [0]
+    )
+    label_stride = 4 if range_key == "24h" else (1 if range_key == "7d" else 5)
+    for index, row in enumerate(rows):
+        row["show_label"] = index % label_stride == 0 or index == len(rows) - 1
+    return {
+        "rows": rows,
+        "traffic_max": traffic_max,
+        "traffic_visit_points": _admin_chart_points(rows, "visits", traffic_max),
+        "traffic_click_points": _admin_chart_points(rows, "clicks", traffic_max),
+        "traffic_complete_points": _admin_chart_points(rows, "completes", traffic_max),
+        "revenue_max": revenue_max,
+        "revenue_source_points": _admin_chart_points(rows, "source_value", revenue_max),
+        "revenue_supplier_points": _admin_chart_points(rows, "supplier_value", revenue_max),
+        "revenue_margin_points": _admin_chart_points(rows, "margin", revenue_max),
+    }
+
+
 @require_GET
 def admin_portal_dashboard(request):
     account, denied = _admin_portal_or_response(request)
     if denied:
         return denied
+    range_key = str(request.GET.get("range") or "7d").lower()
+    if range_key not in ADMIN_REPORT_RANGES:
+        range_key = "7d"
     now = timezone.now()
-    since = now - timedelta(hours=24)
-    inventory = Survey.objects.filter(
-        status=Survey.Status.LIVE,
-        remaining__gt=0,
-        cpi__gt=0,
-    )
-    country_inventory = list(
-        inventory.exclude(country_code="")
-        .values("country_code")
-        .annotate(
-            survey_count=Count("id"),
-            available_completes=Sum("remaining"),
-            average_cpi=Avg("cpi"),
-        )
-        .order_by("-survey_count", "country_code")[:12]
-    )
-    publishers = list(
-        Publisher.objects.select_related("portal_account")
-        .annotate(
-            placement_count=Count("placements", distinct=True),
-            respondent_count=Count("respondents", distinct=True),
-        )
-        .order_by("-updated_at")[:8]
-    )
-    for publisher in publishers:
-        publisher.platform_cut_percent = Decimal("100.00") - publisher.payout_percent
-
-    completed_clicks = OfferClick.objects.filter(
+    duration, range_label = ADMIN_REPORT_RANGES[range_key]
+    since = now - duration
+    clicks = OfferClick.objects.filter(created_at__gte=since)
+    completed_clicks = clicks.filter(
         status=SurveyAttempt.Status.COMPLETED,
         is_verified=True,
-        created_at__gte=since,
     )
+    visit_count = WallVisit.objects.filter(created_at__gte=since).count()
+    click_count = clicks.count()
+    complete_count = completed_clicks.count()
     value_summary = completed_clicks.aggregate(
-        source_value=Sum("source_cpi_snapshot"),
-        supplier_value=Sum("payout_snapshot"),
+        source_value=Coalesce(
+            Sum("source_cpi_snapshot"),
+            Value(Decimal("0.00")),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        ),
+        supplier_value=Coalesce(
+            Sum("payout_snapshot"),
+            Value(Decimal("0.00")),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        ),
     )
-    source_value = value_summary["source_value"] or Decimal("0.00")
-    supplier_value = value_summary["supplier_value"] or Decimal("0.00")
-    OfferwallAdminPortalAccount.objects.filter(pk=account.pk).update(
-        last_seen_at=now
+    source_value = value_summary["source_value"]
+    supplier_value = value_summary["supplier_value"]
+
+    status_labels = dict(SurveyAttempt.Status.choices)
+    outcome_rows = list(
+        clicks.values("status")
+        .annotate(total=Count("id"))
+        .order_by("-total", "status")
     )
-    context = {
-        "admin_account": account,
-        "admin_active_page": "dashboard",
-        "dashboard_counts": {
-            "live_inventory": inventory.count(),
-            "countries": inventory.exclude(country_code="")
-            .values("country_code")
-            .distinct()
-            .count(),
-            "approved_suppliers": PublisherPortalAccount.objects.filter(
-                status=PublisherPortalAccount.Status.APPROVED
-            ).count(),
-            "pending_suppliers": PublisherPortalAccount.objects.filter(
-                status=PublisherPortalAccount.Status.PENDING
-            ).count(),
-            "active_placements": PublisherPlacement.objects.filter(
-                status=PublisherPlacement.Status.ACTIVE
-            ).count(),
-            "visits_24h": WallVisit.objects.filter(created_at__gte=since).count(),
-            "clicks_24h": OfferClick.objects.filter(created_at__gte=since).count(),
-            "completes_24h": completed_clicks.count(),
-        },
-        "country_inventory": country_inventory,
-        "publishers": publishers,
-        "recent_clicks": OfferClick.objects.select_related(
-            "publisher", "survey", "visit"
-        ).order_by("-created_at")[:8],
-        "source_value_24h": source_value,
-        "supplier_value_24h": supplier_value,
-        "platform_margin_24h": source_value - supplier_value,
-    }
+    outcome_colors = ["#2168e8", "#19b5c9", "#1ea672", "#ef9d32", "#d94d64", "#7259d6"]
+    outcome_total = sum(row["total"] for row in outcome_rows)
+    outcome_stop = Decimal("0")
+    donut_stops = []
+    for index, row in enumerate(outcome_rows):
+        row["label"] = status_labels.get(row["status"], str(row["status"]).replace("_", " ").title())
+        row["color"] = outcome_colors[index % len(outcome_colors)]
+        row["percentage"] = _admin_percentage(row["total"], outcome_total)
+        start = outcome_stop
+        outcome_stop += row["percentage"]
+        donut_stops.append(f"{row['color']} {start}% {outcome_stop}%")
+
+    country_rows = list(
+        clicks.exclude(visit__country_code="")
+        .values("visit__country_code")
+        .annotate(
+            clicks=Count("id"),
+            completes=Count(
+                "id",
+                filter=Q(status=SurveyAttempt.Status.COMPLETED, is_verified=True),
+            ),
+            revenue=Coalesce(
+                Sum(
+                    "source_cpi_snapshot",
+                    filter=Q(status=SurveyAttempt.Status.COMPLETED, is_verified=True),
+                ),
+                Value(Decimal("0.00")),
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            ),
+        )
+        .order_by("-clicks", "visit__country_code")[:8]
+    )
+    country_max = max([row["clicks"] for row in country_rows] or [1])
+    for row in country_rows:
+        row["country_code"] = row.pop("visit__country_code")
+        row["bar_percent"] = round(row["clicks"] * 100 / country_max, 2)
+        row["conversion_rate"] = _admin_percentage(row["completes"], row["clicks"])
+
+    supplier_rows = list(
+        clicks.values("publisher__public_id", "publisher__name", "publisher__publisher_number")
+        .annotate(
+            clicks=Count("id"),
+            completes=Count(
+                "id",
+                filter=Q(status=SurveyAttempt.Status.COMPLETED, is_verified=True),
+            ),
+            payout=Coalesce(
+                Sum(
+                    "payout_snapshot",
+                    filter=Q(status=SurveyAttempt.Status.COMPLETED, is_verified=True),
+                ),
+                Value(Decimal("0.00")),
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            ),
+        )
+        .order_by("-clicks", "publisher__name")[:6]
+    )
+    for row in supplier_rows:
+        row["conversion_rate"] = _admin_percentage(row["completes"], row["clicks"])
+
+    inventory = Survey.objects.filter(status=Survey.Status.LIVE, remaining__gt=0, cpi__gt=0)
+    context = _admin_base_context(account, "dashboard")
+    context.update(
+        {
+            "selected_range": range_key,
+            "range_label": range_label,
+            "range_options": [(key, label) for key, (_, label) in ADMIN_REPORT_RANGES.items()],
+            "dashboard_counts": {
+                "visits": visit_count,
+                "clicks": click_count,
+                "completes": complete_count,
+                "unique_respondents": clicks.values("publisher_id", "external_user_id").distinct().count(),
+                "conversion_rate": _admin_percentage(complete_count, click_count),
+                "click_rate": _admin_percentage(click_count, visit_count),
+                "live_inventory": inventory.count(),
+                "active_suppliers": Publisher.objects.filter(is_active=True).count(),
+            },
+            "source_value": source_value,
+            "supplier_value": supplier_value,
+            "platform_margin": source_value - supplier_value,
+            "average_source_cpi": (source_value / complete_count) if complete_count else Decimal("0.00"),
+            "trend": _admin_dashboard_trend(since=since, range_key=range_key),
+            "outcome_rows": outcome_rows,
+            "outcome_total": outcome_total,
+            "outcome_donut": ", ".join(donut_stops) if donut_stops else "#e9eef5 0% 100%",
+            "country_rows": country_rows,
+            "supplier_rows": supplier_rows,
+        }
+    )
     return _no_store(render(request, "offerwall/admin_dashboard.html", context))
+
+
+@require_GET
+def admin_portal_inventory(request):
+    account, denied = _admin_portal_or_response(request)
+    if denied:
+        return denied
+    surveys = Survey.objects.select_related("client", "integration").all()
+    query = str(request.GET.get("q") or "").strip()
+    country = str(request.GET.get("country") or "").strip().upper()
+    provider = str(request.GET.get("provider") or "").strip()
+    status = str(request.GET.get("status") or "").strip().lower()
+    if query:
+        surveys = surveys.filter(
+            Q(local_id__icontains=query)
+            | Q(source_key__icontains=query)
+            | Q(name__icontains=query)
+            | Q(company_name__icontains=query)
+        )
+    if country:
+        surveys = surveys.filter(country_code=country)
+    if provider:
+        surveys = surveys.filter(company_name=provider)
+    if status in {Survey.Status.LIVE, Survey.Status.CLOSED}:
+        surveys = surveys.filter(status=status)
+    surveys = surveys.order_by("-updated_at")
+    paginator = Paginator(surveys, 30)
+    page = paginator.get_page(request.GET.get("page"))
+    live_inventory = Survey.objects.filter(status=Survey.Status.LIVE, remaining__gt=0, cpi__gt=0)
+    context = _admin_base_context(account, "inventory")
+    context.update(
+        {
+            "page": page,
+            "filters": {"q": query, "country": country, "provider": provider, "status": status},
+            "countries": Survey.objects.exclude(country_code="").values_list("country_code", flat=True).distinct().order_by("country_code"),
+            "providers": Survey.objects.exclude(company_name="").values_list("company_name", flat=True).distinct().order_by("company_name"),
+            "inventory_stats": {
+                "live": live_inventory.count(),
+                "countries": live_inventory.exclude(country_code="").values("country_code").distinct().count(),
+                "available_completes": live_inventory.aggregate(total=Sum("remaining"))["total"] or 0,
+                "average_cpi": live_inventory.aggregate(value=Avg("cpi"))["value"] or Decimal("0.00"),
+            },
+        }
+    )
+    return _no_store(render(request, "offerwall/admin_inventory.html", context))
+
+
+@require_http_methods(["GET", "POST"])
+def admin_portal_suppliers(request):
+    account, denied = _admin_portal_or_response(request)
+    if denied:
+        return denied
+    if request.method == "POST":
+        publisher_id = str(request.POST.get("publisher_id") or "").strip()
+        raw_payout = str(request.POST.get("payout_percent") or "").strip()
+        try:
+            payout_percent = Decimal(raw_payout).quantize(Decimal("0.01"))
+            if payout_percent < 0 or payout_percent > 100:
+                raise ValueError
+            publisher = Publisher.objects.get(public_id=publisher_id)
+        except (ArithmeticError, ValidationError, ValueError, Publisher.DoesNotExist):
+            messages.error(request, "Enter a valid supplier payout between 0 and 100%.")
+        else:
+            publisher.payout_percent = payout_percent
+            publisher.save(update_fields=["payout_percent", "updated_at"])
+            messages.success(
+                request,
+                f"{publisher.name} payout updated to {payout_percent:.2f}%.",
+            )
+        return _no_store(HttpResponseRedirect(reverse("offerwall:admin-suppliers")))
+
+    query = str(request.GET.get("q") or "").strip()
+    publishers = Publisher.objects.select_related("portal_account").annotate(
+        placement_count=Count("placements", distinct=True),
+        respondent_count=Count("respondents", distinct=True),
+        click_count=Count("offer_clicks", distinct=True),
+        verified_complete_count=Count(
+            "offer_clicks",
+            filter=Q(
+                offer_clicks__status=SurveyAttempt.Status.COMPLETED,
+                offer_clicks__is_verified=True,
+            ),
+            distinct=True,
+        ),
+    )
+    if query:
+        publishers = publishers.filter(
+            Q(name__icontains=query)
+            | Q(slug__icontains=query)
+            | Q(portal_account__business_email__icontains=query)
+        )
+    publishers = list(publishers.order_by("-is_active", "name"))
+    for publisher in publishers:
+        publisher.platform_cut_percent = Decimal("100.00") - publisher.payout_percent
+        publisher.conversion_rate = _admin_percentage(
+            publisher.verified_complete_count, publisher.click_count
+        )
+    paginator = Paginator(publishers, 25)
+    context = _admin_base_context(account, "suppliers")
+    context.update(
+        {
+            "page": paginator.get_page(request.GET.get("page")),
+            "query": query,
+            "supplier_stats": {
+                "total": Publisher.objects.count(),
+                "active": Publisher.objects.filter(is_active=True).count(),
+                "pending": PublisherPortalAccount.objects.filter(status=PublisherPortalAccount.Status.PENDING).count(),
+                "placements": PublisherPlacement.objects.filter(status=PublisherPlacement.Status.ACTIVE).count(),
+            },
+        }
+    )
+    return _no_store(render(request, "offerwall/admin_suppliers.html", context))
+
+
+@require_GET
+def admin_portal_activity(request):
+    account, denied = _admin_portal_or_response(request)
+    if denied:
+        return denied
+    clicks = OfferClick.objects.select_related(
+        "publisher", "survey", "visit", "attempt"
+    ).order_by("-created_at")
+    status = str(request.GET.get("status") or "").strip()
+    country = str(request.GET.get("country") or "").strip().upper()
+    publisher_id = str(request.GET.get("publisher") or "").strip()
+    query = str(request.GET.get("q") or "").strip()
+    allowed_statuses = {choice for choice, _ in SurveyAttempt.Status.choices}
+    if status in allowed_statuses:
+        clicks = clicks.filter(status=status)
+    if country:
+        clicks = clicks.filter(visit__country_code=country)
+    if publisher_id:
+        clicks = clicks.filter(publisher__public_id=publisher_id)
+    if query:
+        clicks = clicks.filter(
+            Q(external_user_id__icontains=query)
+            | Q(survey__local_id__icontains=query)
+            | Q(survey__name__icontains=query)
+        )
+    paginator = Paginator(clicks, 40)
+    context = _admin_base_context(account, "activity")
+    context.update(
+        {
+            "page": paginator.get_page(request.GET.get("page")),
+            "filters": {"status": status, "country": country, "publisher": publisher_id, "q": query},
+            "status_choices": SurveyAttempt.Status.choices,
+            "countries": WallVisit.objects.exclude(country_code="").values_list("country_code", flat=True).distinct().order_by("country_code"),
+            "publishers": Publisher.objects.order_by("name"),
+        }
+    )
+    return _no_store(render(request, "offerwall/admin_activity.html", context))
 
 
 @require_POST

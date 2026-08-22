@@ -14,6 +14,21 @@ urlpatterns = [
     ),
     path("admin-portal/logout/", views.admin_portal_logout, name="admin-logout"),
     path("admin-portal/", views.admin_portal_dashboard, name="admin-dashboard"),
+    path(
+        "admin-portal/inventory/",
+        views.admin_portal_inventory,
+        name="admin-inventory",
+    ),
+    path(
+        "admin-portal/suppliers/",
+        views.admin_portal_suppliers,
+        name="admin-suppliers",
+    ),
+    path(
+        "admin-portal/activity/",
+        views.admin_portal_activity,
+        name="admin-activity",
+    ),
     path("wall/<slug:publisher_slug>/", views.wall_entry, name="entry"),
     path("wall/session/<uuid:visit_id>/", views.wall_session, name="session"),
     path(

@@ -1,0 +1,38 @@
+{% extends 'offerwall/admin_base.html' %}
+{% block title %}Suppliers & Cuts · RM Wins Admin{% endblock %}
+{% block page_name %}Suppliers & cuts{% endblock %}
+{% block content %}
+<section class="rmw-admin-page-heading">
+  <div><p class="rmw-admin-kicker">Partner management</p><h1>Suppliers &amp; payout cuts</h1><p>Manage supplier economics without changing historical click snapshots.</p></div>
+</section>
+
+<section class="rmw-admin-stat-grid rmw-admin-stat-grid-compact">
+  <article class="accent"><span>Total suppliers</span><strong>{{ supplier_stats.total }}</strong><small>publisher accounts</small></article>
+  <article><span>Active suppliers</span><strong>{{ supplier_stats.active }}</strong><small>enabled for traffic</small></article>
+  <article><span>Pending review</span><strong>{{ supplier_stats.pending }}</strong><small>registrations awaiting action</small></article>
+  <article><span>Active placements</span><strong>{{ supplier_stats.placements }}</strong><small>live integrations</small></article>
+</section>
+
+<section class="rmw-admin-card rmw-admin-filter-card rmw-admin-search-card">
+  <form method="get" class="rmw-admin-filter-grid">
+    <label class="wide"><span>Find supplier</span><input type="search" name="q" value="{{ query }}" placeholder="Company, code or email"></label>
+    <button type="submit">Search</button><a href="{% url 'offerwall:admin-suppliers' %}">Reset</a>
+  </form>
+</section>
+
+<section class="rmw-admin-card rmw-admin-table-card">
+  <div class="rmw-admin-card-head"><div><span>Commercial controls</span><h2>{{ page.paginator.count }} suppliers</h2></div><small>New clicks use the current payout percentage</small></div>
+  <div class="rmw-admin-table-wrap"><table class="rmw-admin-supplier-table"><thead><tr><th>Supplier</th><th>Status</th><th>Placements</th><th>Respondents</th><th>Clicks / completes</th><th>CVR</th><th>Supplier payout</th><th>RM Wins cut</th></tr></thead><tbody>
+    {% for publisher in page.object_list %}<tr>
+      <td><strong>{{ publisher.name }}</strong><small>#{{ publisher.publisher_code }} · {{ publisher.portal_account.business_email|default:publisher.slug }}</small></td>
+      <td><span class="rmw-admin-status {% if publisher.is_active %}active{% endif %}">{{ publisher.is_active|yesno:'Active,Inactive' }}</span></td>
+      <td>{{ publisher.placement_count }}</td><td>{{ publisher.respondent_count }}</td><td>{{ publisher.click_count }} / {{ publisher.verified_complete_count }}</td><td>{{ publisher.conversion_rate }}%</td>
+      <td><form method="post" class="rmw-admin-cut-form">{% csrf_token %}<input type="hidden" name="publisher_id" value="{{ publisher.public_id }}"><input type="number" name="payout_percent" min="0" max="100" step="0.01" value="{{ publisher.payout_percent }}" aria-label="{{ publisher.name }} payout percent"><span>%</span><button type="submit">Save</button></form></td>
+      <td><strong>{{ publisher.platform_cut_percent|floatformat:2 }}%</strong></td>
+    </tr>{% empty %}<tr><td colspan="8">No suppliers match this search.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <nav class="rmw-admin-pagination" aria-label="Supplier pages">
+    {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&q={{ query|urlencode }}">← Previous</a>{% else %}<span></span>{% endif %}<strong>{{ page.number }} / {{ page.paginator.num_pages }}</strong>{% if page.has_next %}<a href="?page={{ page.next_page_number }}&q={{ query|urlencode }}">Next →</a>{% else %}<span></span>{% endif %}
+  </nav>
+</section>
+{% endblock %}
