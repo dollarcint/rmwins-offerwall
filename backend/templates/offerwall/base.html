@@ -8,7 +8,7 @@
   <meta name="description" content="RM Wins secure survey offerwall">
   <title>{% block title %}RM Wins Offerwall{% endblock %}</title>
   {% include 'includes/favicon_links.html' %}
-  <link rel="stylesheet" href="{% static 'offerwall/offerwall.css' %}?v=11">
+  <link rel="stylesheet" href="{% static 'offerwall/offerwall.css' %}?v=12">
 </head>
 <body{% if supplier_portal_enabled %} class="ow-supplier-body"{% endif %}>
   {% if supplier_portal_enabled %}
@@ -26,8 +26,6 @@
         <a class="{% if supplier_active_page == 'general-details' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'general-details' %}"><span aria-hidden="true">◫</span>General details</a>
         <a class="{% if supplier_active_page == 'reports' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'reports' %}"><span aria-hidden="true">⌁</span>Reports</a>
         <a href="{% url 'offerwall:publisher-dashboard' %}#cashout"><span aria-hidden="true">₹</span>Cashout</a>
-        <a class="{% if supplier_active_page == 'leads' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'leads' %}"><span aria-hidden="true">◇</span>Leads</a>
-        <a class="{% if supplier_active_page == 'open-answers' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'open-answers' %}"><span aria-hidden="true">≡</span>Open-ended answers</a>
       </nav>
       <div class="ow-supplier-account">
         <div><span>{{ portal_publisher.name|slice:':1'|upper }}</span><p><strong>{{ portal_publisher.name }}</strong><small>Approved supplier</small></p></div>

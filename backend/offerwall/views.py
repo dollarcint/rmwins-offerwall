@@ -1,5 +1,6 @@
 """Public signed wall, offer clicks, result pages and publisher inventory API."""
 
+import csv
 import hashlib
 import hmac
 import logging
@@ -7,9 +8,9 @@ import mimetypes
 import re
 import secrets
 import uuid
-from datetime import datetime, timezone as datetime_timezone
+from datetime import datetime, time, timedelta, timezone as datetime_timezone
 from decimal import Decimal
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import requests
 from django.conf import settings
@@ -20,14 +21,21 @@ from django.core import signing
 from django.core.cache import caches
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Count, DecimalField, Max, Q, Sum, Value
+from django.db.models import Count, DecimalField, Max, Prefetch, Q, Sum, Value
 from django.db.models.functions import Coalesce
 from django.core.paginator import Paginator
-from django.http import FileResponse, Http404, HttpResponseRedirect, JsonResponse
+from django.http import (
+    FileResponse,
+    Http404,
+    HttpResponseRedirect,
+    JsonResponse,
+    StreamingHttpResponse,
+)
 from django.shortcuts import get_object_or_404, render
 from django.templatetags.static import static
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from django.views.decorators.clickjacking import xframe_options_exempt
@@ -39,6 +47,7 @@ from accounts.throttling import (
     reset_login_account_attempts,
 )
 from surveys.models import Survey, SurveyAttempt
+from surveys.outcomes import provider_outcome
 
 from .forms import (
     PlacementCurrencyForm,
@@ -1523,7 +1532,7 @@ SUPPLIER_SECTION_COPY = {
     ),
     "survey-results": (
         "Survey results",
-        "Completion, termination and quota outcomes will be available here.",
+        "Review respondent journeys, verified outcomes, earnings and postback delivery.",
     ),
     "general-details": (
         "General details",
@@ -1533,15 +1542,275 @@ SUPPLIER_SECTION_COPY = {
         "Reports",
         "Downloadable traffic, conversion and earnings reports are coming next.",
     ),
-    "leads": (
-        "Leads",
-        "Lead events and qualification details will be available here.",
-    ),
-    "open-answers": (
-        "Open-ended answers",
-        "Open-text response exports will be available here when enabled.",
-    ),
 }
+
+
+SURVEY_RESULT_STATUS_FILTERS = {
+    "in_progress": [
+        SurveyAttempt.Status.INITIATED,
+        SurveyAttempt.Status.REDIRECTED,
+    ],
+    "completed": [SurveyAttempt.Status.COMPLETED],
+    "terminated": [SurveyAttempt.Status.TERMINATED],
+    "over_quota": [SurveyAttempt.Status.OVER_QUOTA],
+    "quality_terminated": [SurveyAttempt.Status.QUALITY_TERMINATED],
+}
+
+
+def _survey_result_filters(request, publisher):
+    today = timezone.localdate()
+    end_date = parse_date(str(request.GET.get("end") or "")) or today
+    start_date = (
+        parse_date(str(request.GET.get("start") or ""))
+        or end_date - timedelta(days=29)
+    )
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+
+    start_at = datetime.combine(start_date, time.min)
+    end_at = datetime.combine(end_date + timedelta(days=1), time.min)
+    if settings.USE_TZ:
+        current_zone = timezone.get_current_timezone()
+        start_at = timezone.make_aware(start_at, current_zone)
+        end_at = timezone.make_aware(end_at, current_zone)
+
+    search = str(request.GET.get("q") or "").strip()[:160]
+    status_filter = str(request.GET.get("status") or "all").strip()
+    if status_filter not in {"all", *SURVEY_RESULT_STATUS_FILTERS}:
+        status_filter = "all"
+    placement_filter = str(request.GET.get("placement") or "all").strip()
+    if placement_filter != "all":
+        try:
+            placement_filter = str(uuid.UUID(placement_filter))
+        except (TypeError, ValueError):
+            placement_filter = "all"
+
+    queryset = publisher.offer_clicks.filter(
+        created_at__gte=start_at,
+        created_at__lt=end_at,
+    )
+    if search:
+        queryset = queryset.filter(
+            Q(external_user_id__icontains=search)
+            | Q(survey__local_id__icontains=search)
+            | Q(survey__name__icontains=search)
+            | Q(attempt__rid__icontains=search)
+            | Q(attempt__pid__icontains=search)
+            | Q(visit__external_campaign_id__icontains=search)
+        )
+    if status_filter != "all":
+        queryset = queryset.filter(
+            status__in=SURVEY_RESULT_STATUS_FILTERS[status_filter]
+        )
+    if placement_filter != "all":
+        queryset = queryset.filter(visit__placement__public_id=placement_filter)
+
+    filters = {
+        "q": search,
+        "status": status_filter,
+        "placement": placement_filter,
+        "start": start_date.isoformat(),
+        "end": end_date.isoformat(),
+    }
+    return queryset.order_by("-created_at"), filters
+
+
+def _survey_result_queryset(queryset):
+    money_field = DecimalField(max_digits=14, decimal_places=2)
+    return (
+        queryset.select_related(
+            "survey",
+            "attempt",
+            "visit",
+            "visit__placement",
+        )
+        .prefetch_related(
+            Prefetch(
+                "postback_deliveries",
+                queryset=PostbackDelivery.objects.order_by("-created_at"),
+                to_attr="report_postbacks",
+            ),
+            Prefetch(
+                "ledger_entries",
+                queryset=RewardLedgerEntry.objects.order_by("-created_at"),
+                to_attr="report_ledger_entries",
+            ),
+        )
+        .annotate(
+            report_credit=Coalesce(
+                Sum(
+                    "ledger_entries__amount",
+                    filter=Q(
+                        ledger_entries__entry_type=RewardLedgerEntry.EntryType.CREDIT
+                    ),
+                ),
+                Value(Decimal("0.00"), output_field=money_field),
+                output_field=money_field,
+            ),
+            report_reversal=Coalesce(
+                Sum(
+                    "ledger_entries__amount",
+                    filter=Q(
+                        ledger_entries__entry_type=RewardLedgerEntry.EntryType.REVERSAL
+                    ),
+                ),
+                Value(Decimal("0.00"), output_field=money_field),
+                output_field=money_field,
+            ),
+        )
+    )
+
+
+def _decorate_survey_result(click):
+    click.report_outcome = provider_outcome(click.attempt)
+    click.report_postback = click.report_postbacks[0] if click.report_postbacks else None
+    click.report_reward = click.report_credit - click.report_reversal
+    click.report_transaction_id = (
+        str(click.report_ledger_entries[0].public_id)
+        if click.report_ledger_entries
+        else str(click.public_id)
+    )
+    return click
+
+
+def _safe_csv_cell(value):
+    value = str(value if value is not None else "")
+    return f"'{value}" if value.startswith(("=", "+", "-", "@")) else value
+
+
+class _CsvEcho:
+    def write(self, value):
+        return value
+
+
+def _survey_results_csv(queryset, publisher, filters):
+    writer = csv.writer(_CsvEcho())
+
+    def rows():
+        yield writer.writerow(
+            [
+                "Date",
+                "Respondent ID",
+                "Placement",
+                "App ID",
+                "Survey ID",
+                "Survey",
+                "Status",
+                "Verified",
+                "Reward",
+                "Currency",
+                "Term reason",
+                "Term category",
+                "Transaction ID",
+                "Postback status",
+                "Campaign ID",
+                "Affiliate sub",
+                "Country",
+                "Device",
+            ]
+        )
+        for click in _survey_result_queryset(queryset).iterator(chunk_size=500):
+            _decorate_survey_result(click)
+            placement = click.visit.placement
+            postback = click.report_postback
+            values = [
+                timezone.localtime(click.created_at).isoformat(),
+                click.external_user_id,
+                placement.name if placement else "Direct wall",
+                placement.app_id if placement else "",
+                click.survey.local_id,
+                click.survey.name or f"Survey {click.survey.local_id}",
+                click.attempt.get_status_display(),
+                "Yes" if click.is_verified else "No",
+                f"{click.report_reward:.2f}",
+                publisher.currency,
+                click.report_outcome.get("reason", ""),
+                click.report_outcome.get("category", ""),
+                click.report_transaction_id,
+                postback.get_status_display() if postback else "Not generated",
+                click.visit.external_campaign_id,
+                click.visit.affiliate_sub_id,
+                click.visit.country_code,
+                click.visit.device,
+            ]
+            yield writer.writerow([_safe_csv_cell(value) for value in values])
+
+    filename = f"rmwins-survey-results-{filters['start']}-to-{filters['end']}.csv"
+    response = StreamingHttpResponse(rows(), content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return _no_store(response)
+
+
+def _publisher_survey_results_response(request, publisher):
+    filtered_clicks, filters = _survey_result_filters(request, publisher)
+    if str(request.GET.get("export") or "").strip().lower() == "csv":
+        return _survey_results_csv(filtered_clicks, publisher, filters)
+
+    summary = filtered_clicks.aggregate(
+        total=Count("id"),
+        completed=Count(
+            "id",
+            filter=Q(
+                status=SurveyAttempt.Status.COMPLETED,
+                is_verified=True,
+            ),
+        ),
+        terminated=Count(
+            "id", filter=Q(status=SurveyAttempt.Status.TERMINATED)
+        ),
+        over_quota=Count(
+            "id", filter=Q(status=SurveyAttempt.Status.OVER_QUOTA)
+        ),
+        quality_terminated=Count(
+            "id", filter=Q(status=SurveyAttempt.Status.QUALITY_TERMINATED)
+        ),
+    )
+    ledger = RewardLedgerEntry.objects.filter(
+        publisher=publisher,
+        click_id__in=filtered_clicks.values("pk").order_by(),
+    ).aggregate(
+        credits=Coalesce(
+            Sum(
+                "amount",
+                filter=Q(entry_type=RewardLedgerEntry.EntryType.CREDIT),
+            ),
+            Value(Decimal("0.00")),
+        ),
+        reversals=Coalesce(
+            Sum(
+                "amount",
+                filter=Q(entry_type=RewardLedgerEntry.EntryType.REVERSAL),
+            ),
+            Value(Decimal("0.00")),
+        ),
+    )
+    summary["earnings"] = ledger["credits"] - ledger["reversals"]
+    summary["conversion_rate"] = (
+        (summary["completed"] / summary["total"] * 100) if summary["total"] else 0
+    )
+
+    result_page = Paginator(_survey_result_queryset(filtered_clicks), 40).get_page(
+        request.GET.get("page")
+    )
+    for click in result_page:
+        _decorate_survey_result(click)
+
+    context = _supplier_portal_context(publisher, "survey-results")
+    context.update(
+        {
+            "survey_results": result_page,
+            "survey_result_summary": summary,
+            "survey_result_filters": filters,
+            "survey_result_query": urlencode(filters),
+            "survey_result_placements": publisher.placements.order_by(
+                "website_name", "name"
+            ),
+            "survey_result_timezone": timezone.get_current_timezone_name(),
+        }
+    )
+    return _no_store(
+        render(request, "offerwall/publisher_survey_results.html", context)
+    )
 
 
 def _publisher_respondents_response(request, publisher):
@@ -1604,6 +1873,8 @@ def publisher_section(request, section):
         return denied
     if section == "respondents":
         return _publisher_respondents_response(request, publisher)
+    if section == "survey-results":
+        return _publisher_survey_results_response(request, publisher)
     title, description = SUPPLIER_SECTION_COPY[section]
     context = _supplier_portal_context(publisher, section)
     context.update({"section_title": title, "section_description": description})

@@ -596,7 +596,8 @@ class OfferwallFlowTests(TestCase):
         self.assertContains(page, "Settings")
         self.assertContains(page, "Respondents")
         self.assertContains(page, "Survey results")
-        self.assertContains(page, "Open-ended answers")
+        self.assertNotContains(page, "Open-ended answers")
+        self.assertNotContains(page, ">Leads</a>")
         self.assertNotContains(page, "Wallet Ledger")
         self.assertNotContains(page, "Developer Docs")
         settings_page = self.client.get(
@@ -1088,6 +1089,82 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Reports is ready in navigation")
         self.assertContains(response, "Placements")
+
+    def test_supplier_survey_results_are_filterable_and_show_clean_outcomes(self):
+        self._open_supplier_session(suffix="survey-results")
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Results wall",
+            website_name="Results Site",
+            website_url="https://results.example.test",
+        )
+        visit = create_wall_visit(
+            self.publisher,
+            external_user_id="member-results-77",
+            nonce="results_report_nonce",
+            entry_timestamp=timezone.now(),
+            placement=placement,
+            external_campaign_id="campaign-report",
+            affiliate_sub_id="homepage",
+        )
+        click = self._click(visit=visit)
+        click.attempt.status = SurveyAttempt.Status.TERMINATED
+        click.attempt.status_source = "innovatemr_s2s"
+        click.attempt.loi_seconds = 74
+        click.attempt.upstream_transaction_data = {
+            "termReason": "Profile mismatch",
+            "termReasonCategory": "Demographic",
+        }
+        click.attempt.save(
+            update_fields=[
+                "status",
+                "status_source",
+                "loi_seconds",
+                "upstream_transaction_data",
+                "updated_at",
+            ]
+        )
+        process_attempt_outcome(click.attempt_id)
+
+        response = self.client.get(
+            reverse(
+                "offerwall:publisher-section",
+                kwargs={"section": "survey-results"},
+            ),
+            {
+                "q": "member-results",
+                "status": "terminated",
+                "placement": str(placement.public_id),
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Survey results")
+        self.assertContains(response, "member-results-77")
+        self.assertContains(response, "Results Site")
+        self.assertContains(response, "Profile mismatch")
+        self.assertContains(response, "Demographic")
+        self.assertContains(response, "74 sec")
+        self.assertNotContains(response, self.survey.source_key)
+
+    def test_supplier_survey_results_csv_exports_verified_publisher_reward(self):
+        self._open_supplier_session(suffix="survey-results-csv")
+        click = self._credit_click()
+        response = self.client.get(
+            reverse(
+                "offerwall:publisher-section",
+                kwargs={"section": "survey-results"},
+            ),
+            {"q": click.external_user_id, "status": "completed", "export": "csv"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
+        self.assertIn("attachment", response["Content-Disposition"])
+        payload = b"".join(response.streaming_content).decode("utf-8")
+        self.assertIn("Respondent ID", payload)
+        self.assertIn(click.external_user_id, payload)
+        self.assertIn("Completed", payload)
+        self.assertIn("3.50", payload)
+        self.assertNotIn(self.survey.source_key, payload)
 
     def _credit_click(self):
         click = self._click()

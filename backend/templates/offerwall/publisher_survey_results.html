@@ -1,0 +1,85 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}Survey results · {{ portal_publisher.name }}{% endblock %}
+{% block content %}
+<section class="ow-portal-page ow-survey-results-page">
+  <header class="ow-page-heading ow-results-heading">
+    <div>
+      <span class="ow-eyebrow"><i></i> Supplier analytics</span>
+      <h1>Survey results</h1>
+      <p>Track every respondent journey, verified outcome, reward and postback from one report.</p>
+    </div>
+    <div class="ow-results-heading-actions">
+      <small>Times shown in {{ survey_result_timezone }}</small>
+      <a href="?{{ survey_result_query }}&amp;export=csv">Export CSV</a>
+    </div>
+  </header>
+
+  <div class="ow-result-stats">
+    <article><span>Survey attempts</span><strong>{{ survey_result_summary.total|default:0 }}</strong><small>Selected period</small></article>
+    <article class="success"><span>Verified completes</span><strong>{{ survey_result_summary.completed|default:0 }}</strong><small>{{ survey_result_summary.conversion_rate|floatformat:2 }}% conversion</small></article>
+    <article class="danger"><span>Terminated</span><strong>{{ survey_result_summary.terminated|default:0 }}</strong><small>Provider termination</small></article>
+    <article class="warning"><span>Over quota</span><strong>{{ survey_result_summary.over_quota|default:0 }}</strong><small>Quota full outcomes</small></article>
+    <article class="quality"><span>Quality stops</span><strong>{{ survey_result_summary.quality_terminated|default:0 }}</strong><small>Quality validation</small></article>
+    <article class="earnings"><span>Net earnings</span><strong>{{ portal_publisher.currency }} {{ survey_result_summary.earnings|floatformat:2 }}</strong><small>Credits after reversals</small></article>
+  </div>
+
+  <section class="ow-results-panel">
+    <header>
+      <div><h2>Outcome activity</h2><p>Search by respondent, RM Wins survey ID, tracking ID or campaign.</p></div>
+      <nav class="ow-result-quick-tabs" aria-label="Result status shortcuts">
+        <a class="{% if survey_result_filters.status == 'all' %}active{% endif %}" href="?start={{ survey_result_filters.start }}&amp;end={{ survey_result_filters.end }}&amp;placement={{ survey_result_filters.placement }}&amp;status=all">All</a>
+        <a class="{% if survey_result_filters.status == 'completed' %}active{% endif %}" href="?start={{ survey_result_filters.start }}&amp;end={{ survey_result_filters.end }}&amp;placement={{ survey_result_filters.placement }}&amp;status=completed">Completed</a>
+        <a class="{% if survey_result_filters.status == 'terminated' %}active{% endif %}" href="?start={{ survey_result_filters.start }}&amp;end={{ survey_result_filters.end }}&amp;placement={{ survey_result_filters.placement }}&amp;status=terminated">Terminated</a>
+        <a class="{% if survey_result_filters.status == 'over_quota' %}active{% endif %}" href="?start={{ survey_result_filters.start }}&amp;end={{ survey_result_filters.end }}&amp;placement={{ survey_result_filters.placement }}&amp;status=over_quota">Over quota</a>
+      </nav>
+    </header>
+
+    <form method="get" class="ow-result-filters">
+      <label class="search"><span>Search</span><input type="search" name="q" value="{{ survey_result_filters.q }}" placeholder="Respondent, survey, RID or campaign"></label>
+      <label><span>Placement</span><select name="placement"><option value="all">All placements</option>{% for placement in survey_result_placements %}<option value="{{ placement.public_id }}" {% if survey_result_filters.placement == placement.public_id|stringformat:'s' %}selected{% endif %}>{{ placement.website_name }} · {{ placement.app_id }}</option>{% endfor %}</select></label>
+      <label><span>Status</span><select name="status">
+        <option value="all" {% if survey_result_filters.status == 'all' %}selected{% endif %}>All outcomes</option>
+        <option value="in_progress" {% if survey_result_filters.status == 'in_progress' %}selected{% endif %}>In progress</option>
+        <option value="completed" {% if survey_result_filters.status == 'completed' %}selected{% endif %}>Completed</option>
+        <option value="terminated" {% if survey_result_filters.status == 'terminated' %}selected{% endif %}>Terminated</option>
+        <option value="over_quota" {% if survey_result_filters.status == 'over_quota' %}selected{% endif %}>Over quota</option>
+        <option value="quality_terminated" {% if survey_result_filters.status == 'quality_terminated' %}selected{% endif %}>Quality terminated</option>
+      </select></label>
+      <label><span>From</span><input type="date" name="start" value="{{ survey_result_filters.start }}"></label>
+      <label><span>To</span><input type="date" name="end" value="{{ survey_result_filters.end }}"></label>
+      <div class="actions"><button type="submit">Apply filters</button><a href="{% url 'offerwall:publisher-section' 'survey-results' %}">Clear</a></div>
+    </form>
+
+    <div class="ow-result-table-wrap">
+      <table class="ow-result-table">
+        <thead><tr><th>Date</th><th>Respondent</th><th>Placement</th><th>Survey</th><th>Outcome</th><th>Reward</th><th>Journey</th><th>Postback</th><th>Transaction</th></tr></thead>
+        <tbody>
+        {% for result in survey_results %}
+          <tr>
+            <td><strong>{{ result.created_at|date:'d M Y' }}</strong><small>{{ result.created_at|date:'H:i:s' }}</small></td>
+            <td><strong>{{ result.external_user_id }}</strong><small>{% if result.visit.external_campaign_id %}Campaign {{ result.visit.external_campaign_id }}{% else %}No campaign{% endif %}</small>{% if result.visit.affiliate_sub_id %}<code>Sub: {{ result.visit.affiliate_sub_id }}</code>{% endif %}</td>
+            <td>{% if result.visit.placement %}<strong>{{ result.visit.placement.website_name }}</strong><small>{{ result.visit.placement.app_id }}</small>{% else %}<strong>Direct wall</strong><small>No placement</small>{% endif %}</td>
+            <td><strong>{{ result.survey.name|default:'Untitled survey' }}</strong><code>{{ result.survey.local_id }}</code><small>{{ result.visit.country_code|default:'Unknown country' }} · {{ result.visit.device|default:'Unknown device' }}</small></td>
+            <td>
+              <span class="ow-result-status {% if result.status == '1' and result.is_verified %}completed{% elif result.status == '2' %}terminated{% elif result.status == '3' %}over-quota{% elif result.status == '4' %}quality{% else %}progress{% endif %}">{{ result.attempt.get_status_display }}</span>
+              {% if result.is_verified %}<small class="verified">✓ Provider verified</small>{% else %}<small>Not yet verified</small>{% endif %}
+              {% if result.report_outcome.reason %}<em title="{{ result.report_outcome.reason }}">{{ result.report_outcome.reason }}</em>{% endif %}
+              {% if result.report_outcome.category %}<small>{{ result.report_outcome.category }}</small>{% endif %}
+            </td>
+            <td><strong class="ow-result-money{% if result.report_reward < 0 %} negative{% endif %}">{{ portal_publisher.currency }} {{ result.report_reward|floatformat:2 }}</strong><small>{% if result.report_credit %}Credited {{ result.report_credit|floatformat:2 }}{% else %}No credit{% endif %}</small>{% if result.report_reversal %}<small>Reversed {{ result.report_reversal|floatformat:2 }}</small>{% endif %}</td>
+            <td><strong>{% if result.attempt.loi_seconds != None %}{{ result.attempt.loi_seconds }} sec{% else %}In progress{% endif %}</strong><small>RID {{ result.attempt.rid }}</small></td>
+            <td>{% if result.report_postback %}<span class="ow-postback-state {{ result.report_postback.status }}">{{ result.report_postback.get_status_display }}</span><small>{{ result.report_postback.attempt_count }} attempt{{ result.report_postback.attempt_count|pluralize }}</small>{% if result.report_postback.response_code %}<code>HTTP {{ result.report_postback.response_code }}</code>{% endif %}{% else %}<span class="ow-postback-state none">Not generated</span><small>No outcome callback</small>{% endif %}</td>
+            <td><code class="ow-result-transaction">{{ result.report_transaction_id }}</code><small>{{ result.public_id }}</small></td>
+          </tr>
+        {% empty %}<tr><td colspan="9" class="ow-result-empty"><strong>No survey results found</strong><span>Try a wider date range or clear the current filters.</span></td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <footer class="ow-result-footer">
+      <span>Showing {{ survey_results.start_index }}–{{ survey_results.end_index }} of {{ survey_results.paginator.count }} result{{ survey_results.paginator.count|pluralize }}</span>
+      {% if survey_results.paginator.num_pages > 1 %}<nav aria-label="Survey result pages">{% if survey_results.has_previous %}<a href="?{{ survey_result_query }}&amp;page={{ survey_results.previous_page_number }}">Previous</a>{% endif %}<strong>Page {{ survey_results.number }} of {{ survey_results.paginator.num_pages }}</strong>{% if survey_results.has_next %}<a href="?{{ survey_result_query }}&amp;page={{ survey_results.next_page_number }}">Next</a>{% endif %}</nav>{% endif %}
+    </footer>
+  </section>
+</section>
+{% endblock %}
