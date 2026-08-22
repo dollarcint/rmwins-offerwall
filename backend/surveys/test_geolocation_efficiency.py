@@ -17,6 +17,7 @@ class GeolocationEfficiencyTests(SimpleTestCase):
         TRUST_X_FORWARDED_FOR=True,
         TRUST_CLOUDFLARE_HEADERS=False,
         GEOIP_CACHE_TTL_SECONDS=300,
+        GEOIP_UNKNOWN_CACHE_TTL_SECONDS=45,
     )
     @patch("surveys.geolocation._from_http", return_value={})
     @patch(
@@ -45,6 +46,35 @@ class GeolocationEfficiencyTests(SimpleTestCase):
         self.assertEqual(result["ip"], "8.8.8.8")
         self.assertEqual(result["country_code"], "IN")
         self.assertNotIn("trusted_proxy", result["source"])
+        cache.set.assert_called_once_with(
+            geolocation._cache_key("8.8.8.8"), result, timeout=300
+        )
+
+    @override_settings(
+        TRUST_X_FORWARDED_FOR=True,
+        TRUST_CLOUDFLARE_HEADERS=False,
+        GEOIP_CACHE_TTL_SECONDS=300,
+        GEOIP_UNKNOWN_CACHE_TTL_SECONDS=45,
+    )
+    @patch("surveys.geolocation._from_http", return_value={})
+    @patch("surveys.geolocation._from_maxmind", return_value={})
+    def test_unknown_country_is_cached_only_briefly(self, _maxmind, _http):
+        cache = Mock()
+        cache.get.return_value = None
+        request = SimpleNamespace(
+            META={
+                "REMOTE_ADDR": "127.0.0.1",
+                "HTTP_X_FORWARDED_FOR": "8.8.4.4",
+            }
+        )
+
+        with patch.object(geolocation, "caches", {"default": cache}):
+            result = geolocation.resolve_entry_geolocation(request)
+
+        self.assertEqual(result["country_code"], "")
+        cache.set.assert_called_once_with(
+            geolocation._cache_key("8.8.4.4"), result, timeout=45
+        )
 
     @patch("surveys.geolocation.requests.Session")
     def test_remote_lookup_session_is_reused_within_a_worker_thread(self, session_class):

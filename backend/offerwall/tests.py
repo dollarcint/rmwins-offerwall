@@ -200,6 +200,62 @@ class OfferwallFlowTests(TestCase):
         )
         self.assertEqual(offer_catalog(self.publisher, visit), [])
 
+    def test_saved_iframe_visit_requires_country_and_uses_strict_market_filter(self):
+        placement = PublisherPlacement.objects.create(
+            publisher=self.publisher,
+            name="Country guarded wall",
+            website_name="Country Site",
+            website_url="https://country.example.test",
+        )
+        unknown_profile = self._verified_respondent(
+            sid="unknown-country-user",
+            placement=placement,
+        )
+        unknown_visit = create_wall_visit(
+            self.publisher,
+            external_user_id="unknown-country-user",
+            nonce="unknown_country_nonce",
+            entry_timestamp=timezone.now(),
+            placement=placement,
+            respondent=unknown_profile,
+        )
+        self.assertEqual(offer_catalog(self.publisher, unknown_visit), [])
+
+        india_profile = self._verified_respondent(
+            sid="india-user",
+            placement=placement,
+        )
+        wrong_country_visit = create_wall_visit(
+            self.publisher,
+            external_user_id="india-user",
+            nonce="india_country_nonce",
+            entry_timestamp=timezone.now(),
+            placement=placement,
+            respondent=india_profile,
+        )
+        wrong_country_visit.country_code = "IN"
+        wrong_country_visit.save(update_fields=["country_code"])
+        self.assertEqual(offer_catalog(self.publisher, wrong_country_visit), [])
+
+        us_profile = self._verified_respondent(
+            sid="us-user",
+            placement=placement,
+        )
+        matching_visit = create_wall_visit(
+            self.publisher,
+            external_user_id="us-user",
+            nonce="us_country_nonce",
+            entry_timestamp=timezone.now(),
+            placement=placement,
+            respondent=us_profile,
+        )
+        matching_visit.country_code = "US"
+        matching_visit.save(update_fields=["country_code"])
+        self.assertEqual(
+            [offer["id"] for offer in offer_catalog(self.publisher, matching_visit)],
+            [self.survey.local_id],
+        )
+
     def test_override_changes_title_reward_and_featured_sort(self):
         visit = self._visit()
         OfferOverride.objects.create(
@@ -850,7 +906,11 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(visit.gaid, "android-ad-id")
         self.assertTrue(OfferClick.objects.filter(visit=visit, survey=self.survey).exists())
 
-    def test_placement_embed_creates_placement_attributed_visit(self):
+    @patch(
+        "offerwall.services.resolve_entry_geolocation",
+        return_value={"country_code": "US"},
+    )
+    def test_placement_embed_creates_placement_attributed_visit(self, _geolocation):
         placement = PublisherPlacement.objects.create(
             publisher=self.publisher,
             name="Embedded wall",
@@ -932,7 +992,13 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(direct_visit.external_campaign_id, "winter")
         self.assertEqual(direct_visit.affiliate_sub_id, "cta")
 
-    def test_direct_app_iframe_enforces_domains_and_ignores_sid_placeholder(self):
+    @patch(
+        "offerwall.services.resolve_entry_geolocation",
+        return_value={"country_code": "US"},
+    )
+    def test_direct_app_iframe_enforces_domains_and_ignores_sid_placeholder(
+        self, _geolocation
+    ):
         placement = PublisherPlacement.objects.create(
             publisher=self.publisher,
             name="Direct frame",
@@ -990,7 +1056,11 @@ class OfferwallFlowTests(TestCase):
             allowed["Content-Security-Policy"],
         )
 
-    def test_iframe_onboards_verifies_lists_and_bans_respondent(self):
+    @patch(
+        "offerwall.services.resolve_entry_geolocation",
+        return_value={"country_code": "US"},
+    )
+    def test_iframe_onboards_verifies_lists_and_bans_respondent(self, _geolocation):
         placement = PublisherPlacement.objects.create(
             publisher=self.publisher,
             name="Onboarding wall",

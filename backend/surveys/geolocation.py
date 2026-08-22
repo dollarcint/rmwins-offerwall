@@ -97,7 +97,7 @@ def _clean_postal_code(value) -> str:
 
 def _cache_key(ip_value: str) -> str:
     digest = hashlib.sha256(ip_value.encode("utf-8")).hexdigest()
-    return f"entry-geo:v1:{digest}"
+    return f"entry-geo:v2:{digest}"
 
 
 def _from_maxmind(ip_value: str) -> dict:
@@ -189,7 +189,12 @@ def resolve_entry_geolocation(request) -> dict:
         "source": str(result.get("source") or "unknown")[:40],
     }
     try:
-        cache.set(key, result, timeout=settings.GEOIP_CACHE_TTL_SECONDS)
+        cache_timeout = (
+            settings.GEOIP_CACHE_TTL_SECONDS
+            if result["country_code"]
+            else settings.GEOIP_UNKNOWN_CACHE_TTL_SECONDS
+        )
+        cache.set(key, result, timeout=cache_timeout)
     except Exception:
         logger.warning("Could not cache entry GeoIP result", exc_info=True)
     return result

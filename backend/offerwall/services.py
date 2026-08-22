@@ -159,9 +159,16 @@ def eligible_surveys(publisher: Publisher, visit: WallVisit):
         .distinct()
     )
     country_code = str(visit.country_code or "").strip().upper()
+    if visit.pk and visit.placement_id and visit.respondent_id and not country_code:
+        # A real iframe visit must never fall back to the unfiltered catalog.
+        # Inventory API previews use an unsaved visit and may still explicitly
+        # request country=All, but respondent traffic is fail-closed until its
+        # market has been resolved from the entry IP.
+        return queryset.none()
     if country_code:
         queryset = queryset.filter(
-            Q(country_code="") | Q(country_code__iexact=country_code) | Q(country__iexact=country_code)
+            Q(country_code__iexact=country_code)
+            | Q(country_code="", country__iexact=country_code)
         )
     device = str(visit.device or "").strip()
     if device and device != "Unknown":

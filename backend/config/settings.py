@@ -508,6 +508,9 @@ GEOIP_LOOKUP_TIMEOUT_SECONDS = max(
 GEOIP_CACHE_TTL_SECONDS = max(
     60, int(os.getenv("GEOIP_CACHE_TTL_SECONDS", "2592000"))
 )
+GEOIP_UNKNOWN_CACHE_TTL_SECONDS = max(
+    30, int(os.getenv("GEOIP_UNKNOWN_CACHE_TTL_SECONDS", "300"))
+)
 
 CSRF_TRUSTED_ORIGINS = [
     value.strip() for value in os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if value.strip()
