@@ -157,6 +157,7 @@ def eligible_surveys(publisher: Publisher, visit: WallVisit):
             ~Q(entry_link="")
             | Q(integration__provider_code__in=("rfg", "cint"), integration__is_active=True)
         )
+        .exclude(offerwall_inventory_rule__is_enabled=False)
         .exclude(offerwall_overrides__publisher=publisher, offerwall_overrides__is_excluded=True)
         .distinct()
     )

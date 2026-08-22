@@ -8,7 +8,7 @@
   <meta name="description" content="RM Wins secure survey offerwall">
   <title>{% block title %}RM Wins Offerwall{% endblock %}</title>
   {% include 'includes/favicon_links.html' %}
-  <link rel="stylesheet" href="{% static 'offerwall/offerwall.css' %}?v=13">
+  <link rel="stylesheet" href="{% static 'offerwall/offerwall.css' %}?v=14">
   <link rel="stylesheet" href="{% static 'offerwall/conversion_engine.css' %}?v=2">
 </head>
 <body{% if supplier_portal_enabled %} class="ow-supplier-body"{% endif %}>
@@ -26,7 +26,7 @@
         <a class="{% if supplier_active_page == 'survey-results' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'survey-results' %}"><span aria-hidden="true">✓</span>Survey results</a>
         <a class="{% if supplier_active_page == 'general-details' %}active{% endif %}" href="{% url 'offerwall:publisher-general-details' %}"><span aria-hidden="true">◫</span>General details</a>
         <a class="{% if supplier_active_page == 'reports' %}active{% endif %}" href="{% url 'offerwall:publisher-section' 'reports' %}"><span aria-hidden="true">⌁</span>Reports</a>
-        <a href="{% url 'offerwall:publisher-dashboard' %}#cashout"><span aria-hidden="true">₹</span>Cashout</a>
+        <a href="{% url 'offerwall:publisher-dashboard' %}#billing"><span aria-hidden="true">₹</span>Monthly Billing</a>
       </nav>
       <div class="ow-supplier-account">
         <div><span>{{ portal_publisher.name|slice:':1'|upper }}</span><p><strong>{{ portal_publisher.name }}</strong><small>Approved supplier</small></p></div>

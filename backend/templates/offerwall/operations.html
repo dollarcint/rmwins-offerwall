@@ -18,7 +18,7 @@
 </section>
 
 <nav class="ow-ops-tabs" aria-label="Offerwall operation sections">
-  <a href="#registrations">Registrations</a><a href="#publishers">Publishers</a><a href="#payouts">Payouts</a><a href="#ledger">Reward ledger</a><a href="#postbacks">Postbacks</a>
+  <a href="#registrations">Registrations</a><a href="#publishers">Publishers</a><a href="#payouts">Monthly billing</a><a href="#ledger">Reward ledger</a><a href="#postbacks">Postbacks</a>
 </nav>
 
 <section class="ow-ops-panel" id="registrations">
@@ -41,14 +41,14 @@
 </section>
 
 <section class="ow-ops-panel" id="payouts">
-  <header><div><span>Finance</span><h2>Payout requests</h2></div><small>Controlled status transitions with payment reference</small></header>
-  <div class="ow-ops-table-wrap"><table><thead><tr><th>Request</th><th>Publisher</th><th>Amount</th><th>Method</th><th>Status</th><th>Action</th></tr></thead><tbody>
-  {% for payout in payout_requests %}<tr><td><strong>{{ payout.requested_at|date:"d M Y" }}</strong><small>{{ payout.public_id }}</small></td><td>{{ payout.publisher.name }}</td><td><strong>{{ payout.currency }} {{ payout.amount }}</strong></td><td>{{ payout.payout_method }}</td><td><span class="ow-ops-status {{ payout.status }}">{{ payout.get_status_display }}</span></td><td><div class="ow-ops-actions">
+  <header><div><span>Finance</span><h2>Monthly billing statements</h2></div><small>System-generated after every calendar month closes</small></header>
+  <div class="ow-ops-table-wrap"><table><thead><tr><th>Invoice</th><th>Publisher</th><th>Amount</th><th>Period</th><th>Status</th><th>Action</th></tr></thead><tbody>
+  {% for payout in payout_requests %}<tr><td><strong>{{ payout.invoice_number|default:payout.public_id }}</strong><small>{{ payout.requested_at|date:"d M Y" }}</small></td><td>{{ payout.publisher.name }}</td><td><strong>{{ payout.currency }} {{ payout.amount }}</strong></td><td>{% if payout.billing_period_start %}{{ payout.billing_period_start|date:'M Y' }}{% else %}Legacy{% endif %}</td><td><span class="ow-ops-status {{ payout.status }}">{{ payout.get_status_display }}</span></td><td><div class="ow-ops-actions">
     {% if payout.status == 'pending' %}<form method="post" action="{% url 'offerwall:operations-action' %}">{% csrf_token %}<input type="hidden" name="action" value="payout-approve"><input type="hidden" name="payout_id" value="{{ payout.pk }}"><button class="approve" type="submit">Approve</button></form><form method="post" action="{% url 'offerwall:operations-action' %}">{% csrf_token %}<input type="hidden" name="action" value="payout-reject"><input type="hidden" name="payout_id" value="{{ payout.pk }}"><button class="reject" type="submit">Reject</button></form>
     {% elif payout.status == 'approved' %}<form method="post" action="{% url 'offerwall:operations-action' %}">{% csrf_token %}<input type="hidden" name="action" value="payout-process"><input type="hidden" name="payout_id" value="{{ payout.pk }}"><button class="approve" type="submit">Process</button></form>
     {% elif payout.status == 'processing' %}<form class="ow-reference-form" method="post" action="{% url 'offerwall:operations-action' %}">{% csrf_token %}<input type="hidden" name="action" value="payout-paid"><input type="hidden" name="payout_id" value="{{ payout.pk }}"><input name="payment_reference" maxlength="160" placeholder="Payment reference" required><button class="approve" type="submit">Mark paid</button></form>
     {% else %}<small>{{ payout.payment_reference|default:"Finalized" }}</small>{% endif %}
-  </div></td></tr>{% empty %}<tr><td class="ow-ops-empty" colspan="6">No withdrawal requests yet.</td></tr>{% endfor %}
+  </div></td></tr>{% empty %}<tr><td class="ow-ops-empty" colspan="6">No monthly statements yet.</td></tr>{% endfor %}
   </tbody></table></div>
 </section>
 

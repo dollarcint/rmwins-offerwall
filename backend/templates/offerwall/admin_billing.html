@@ -1,0 +1,42 @@
+{% extends 'offerwall/admin_base.html' %}
+{% block title %}Monthly billing · RM Wins Admin{% endblock %}
+{% block page_name %}Monthly billing{% endblock %}
+{% block content %}
+<section class="rmw-admin-page-heading rmw-admin-heading-actions">
+  <div><p class="rmw-admin-kicker">Supplier finance</p><h1>Monthly billing statements</h1><p>Each supplier receives one statement after the calendar month closes. Manual cashout is disabled.</p></div>
+  <form method="post">{% csrf_token %}<input type="hidden" name="action" value="generate-monthly"><button type="submit" class="rmw-admin-primary-action">Generate previous month</button></form>
+</section>
+
+<section class="rmw-admin-stat-grid rmw-admin-stat-grid-compact">
+  <article class="accent"><span>Statements</span><strong>{{ billing_stats.generated }}</strong><small>all billing periods</small></article>
+  <article><span>In settlement</span><strong>{{ billing_stats.pending }}</strong><small>pending, approved or processing</small></article>
+  <article><span>Outstanding value</span><strong>${{ billing_stats.pending_value|floatformat:2 }}</strong><small>awaiting payment</small></article>
+  <article><span>Paid value</span><strong>${{ billing_stats.paid_value|floatformat:2 }}</strong><small>settled statements</small></article>
+</section>
+
+<section class="rmw-admin-card rmw-admin-filter-card">
+  <form method="get" class="rmw-admin-filter-grid">
+    <label class="wide"><span>Search billing</span><input type="search" name="q" value="{{ filters.q }}" placeholder="Invoice, supplier or payment reference"></label>
+    <label><span>Supplier</span><select name="publisher"><option value="">All suppliers</option>{% for item in publishers %}<option value="{{ item.public_id }}" {% if filters.publisher == item.public_id|stringformat:'s' %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
+    <label><span>Status</span><select name="status"><option value="all">All statuses</option>{% for value,label in status_choices %}<option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <button type="submit">Apply</button><a href="{% url 'offerwall:admin-billing' %}">Reset</a>
+  </form>
+</section>
+
+<section class="rmw-admin-card rmw-admin-table-card">
+  <div class="rmw-admin-card-head"><div><span>Settlement queue</span><h2>{{ page.paginator.count }} statements</h2></div><small>One invoice per supplier, currency and month</small></div>
+  <div class="rmw-admin-billing-list">
+    {% for statement in page.object_list %}<article class="rmw-admin-billing-row">
+      <div class="rmw-admin-billing-main"><span class="rmw-admin-status {{ statement.status }}">{{ statement.get_status_display }}</span><h3>{{ statement.invoice_number|default:statement.public_id }}</h3><p>{{ statement.publisher.name }} · Publisher {{ statement.publisher.publisher_code }}</p></div>
+      <dl><div><dt>Period</dt><dd>{% if statement.billing_period_start %}{{ statement.billing_period_start|date:'d M Y' }} – {{ statement.billing_period_end|date:'d M Y' }}{% else %}Legacy statement{% endif %}</dd></div><div><dt>Amount</dt><dd>{{ statement.currency }} {{ statement.amount|floatformat:2 }}</dd></div><div><dt>Generated</dt><dd>{{ statement.requested_at|date:'d M Y, H:i' }}</dd></div><div><dt>Reference</dt><dd>{{ statement.payment_reference|default:'—' }}</dd></div></dl>
+      <div class="rmw-admin-billing-actions">
+        {% if statement.status == 'pending' %}<form method="post">{% csrf_token %}<input type="hidden" name="statement_id" value="{{ statement.public_id }}"><input type="hidden" name="action" value="approve"><input name="admin_note" maxlength="500" placeholder="Review note"><button type="submit" class="approve">Approve</button></form><form method="post">{% csrf_token %}<input type="hidden" name="statement_id" value="{{ statement.public_id }}"><input type="hidden" name="action" value="reject"><input name="admin_note" maxlength="500" placeholder="Reason"><button type="submit" class="reject">Reject</button></form>
+        {% elif statement.status == 'approved' %}<form method="post">{% csrf_token %}<input type="hidden" name="statement_id" value="{{ statement.public_id }}"><input type="hidden" name="action" value="process"><button type="submit" class="approve">Start processing</button></form>
+        {% elif statement.status == 'processing' %}<form method="post">{% csrf_token %}<input type="hidden" name="statement_id" value="{{ statement.public_id }}"><input type="hidden" name="action" value="paid"><input name="payment_reference" maxlength="160" placeholder="Bank / payment reference" required><button type="submit" class="approve">Mark paid</button></form>
+        {% else %}<small>{{ statement.admin_note|default:'Statement finalized.' }}</small>{% endif %}
+      </div>
+    </article>{% empty %}<p class="rmw-admin-empty">No monthly billing statements yet.</p>{% endfor %}
+  </div>
+  <nav class="rmw-admin-pagination">{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&amp;q={{ filters.q|urlencode }}&amp;status={{ filters.status }}&amp;publisher={{ filters.publisher }}">← Previous</a>{% else %}<span></span>{% endif %}<strong>{{ page.number }} / {{ page.paginator.num_pages }}</strong>{% if page.has_next %}<a href="?page={{ page.next_page_number }}&amp;q={{ filters.q|urlencode }}&amp;status={{ filters.status }}&amp;publisher={{ filters.publisher }}">Next →</a>{% else %}<span></span>{% endif %}</nav>
+</section>
+{% endblock %}

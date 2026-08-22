@@ -24,6 +24,13 @@ def release_due_rewards_task():
     return {"released": release_due_conversions()}
 
 
+@shared_task(name="offerwall.generate_monthly_billings")
+def generate_monthly_billings_task():
+    from .wallet import generate_due_monthly_billings
+
+    return generate_due_monthly_billings()
+
+
 def _validated_callback_url(url: str) -> str:
     parsed = urlsplit(str(url or "").strip())
     allowed_schemes = {"http", "https"} if settings.DEBUG else {"https"}

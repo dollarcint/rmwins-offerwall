@@ -7,16 +7,16 @@
     <span class="ow-session-pill">Currency <strong>{{ wallet.currency }}</strong></span>
   </header>
   <div class="ow-wallet-grid">
-    <article class="primary"><small>Available balance</small><strong>{{ wallet.currency }} {{ wallet.available|floatformat:2 }}</strong><span>Ready to withdraw</span></article>
+    <article class="primary"><small>Unbilled balance</small><strong>{{ wallet.currency }} {{ wallet.available|floatformat:2 }}</strong><span>Included in the next monthly statement</span></article>
     <article class="pending"><small>Pending rewards</small><strong>{{ wallet.currency }} {{ wallet.pending|floatformat:2 }}</strong><span>In hold or manual review</span></article>
     <article><small>Approved earnings</small><strong>{{ wallet.currency }} {{ wallet.net_earnings|floatformat:2 }}</strong><span>Currently valid rewards</span></article>
-    <article><small>Reserved</small><strong>{{ wallet.currency }} {{ wallet.reserved|floatformat:2 }}</strong><span>Pending and processing</span></article>
-    <article><small>Paid</small><strong>{{ wallet.currency }} {{ wallet.paid|floatformat:2 }}</strong><span>Completed withdrawals</span></article>
+    <article><small>In billing</small><strong>{{ wallet.currency }} {{ wallet.reserved|floatformat:2 }}</strong><span>Generated or processing statements</span></article>
+    <article><small>Paid</small><strong>{{ wallet.currency }} {{ wallet.paid|floatformat:2 }}</strong><span>Settled monthly billing</span></article>
   </div>
   <div class="ow-publisher-stats">
     <span><strong>{{ placement_count }}</strong> Placements</span><span><strong>{{ stats.clicks }}</strong> Clicks</span><span><strong>{{ stats.users }}</strong> Respondents</span><span><strong>{{ stats.verified_completes }}</strong> Verified completes</span>
   </div>
-  {% if wallet.exposure > 0 %}<div class="ow-wallet-exposure"><strong>Balance adjustment in progress</strong><span>{{ wallet.currency }} {{ wallet.exposure|floatformat:2 }} is outstanding after a provider reversal. New withdrawals are paused until it is recovered.</span></div>{% endif %}
+  {% if wallet.exposure > 0 %}<div class="ow-wallet-exposure"><strong>Balance adjustment in progress</strong><span>{{ wallet.currency }} {{ wallet.exposure|floatformat:2 }} is outstanding after a provider reversal and will be carried into future billing.</span></div>{% endif %}
   <div class="ow-publisher-layout">
     <section class="ow-panel">
       <header><div><span class="ow-eyebrow"><i></i> Recent activity</span><h2>Reward ledger</h2></div></header>
@@ -25,22 +25,18 @@
       {% empty %}<tr><td colspan="6" class="ow-table-empty">No verified reward activity yet.</td></tr>{% endfor %}
       </tbody></table></div>
     </section>
-    <aside class="ow-panel ow-withdrawal-panel" id="cashout">
-      <header><div><span class="ow-eyebrow"><i></i> Payouts</span><h2>Request withdrawal</h2></div></header>
-      <p>Minimum payout: {{ wallet.currency }} {{ wallet.minimum_payout|floatformat:2 }}</p>
-      <form action="{% url 'offerwall:publisher-withdrawal' %}" method="post" class="ow-withdrawal-form">{% csrf_token %}
-        <label>Amount<input name="amount" type="number" min="{{ wallet.minimum_payout }}" max="{{ wallet.available }}" step="0.01" required placeholder="0.00"></label>
-        <label>Payout method<select name="payout_method" required><option value="">Select method</option>{% for method in payout_methods %}<option>{{ method }}</option>{% endfor %}</select></label>
-        <label>Payment note<textarea name="publisher_note" maxlength="500" rows="3" placeholder="Account label or payout instructions. Do not enter passwords."></textarea></label>
-        <button type="submit" class="ow-button primary wide" {% if wallet.available < wallet.minimum_payout or wallet.exposure > 0 %}disabled{% endif %}>Submit withdrawal</button>
-      </form>
+    <aside class="ow-panel ow-withdrawal-panel" id="billing">
+      <header><div><span class="ow-eyebrow"><i></i> Billing cycle</span><h2>Automatic monthly billing</h2></div></header>
+      <div class="ow-monthly-billing-date"><small>Next statement cycle</small><strong>{{ wallet.next_billing_date|date:'d M Y' }}</strong></div>
+      <p>Your complete unbilled available balance is automatically locked into one statement after each calendar month closes.</p>
+      <ul class="ow-monthly-billing-rules"><li>No manual cashout request is required.</li><li>Rewards still on hold move to the next eligible month.</li><li>Rejected or canceled statements carry back into the next billing cycle.</li></ul>
     </aside>
   </div>
   <section class="ow-panel ow-payout-history">
-    <header><div><span class="ow-eyebrow"><i></i> Withdrawal history</span><h2>Payout requests</h2></div></header>
-    <div class="ow-table-wrap"><table><thead><tr><th>Requested</th><th>ID</th><th>Method</th><th>Status</th><th>Amount</th><th>Reference</th></tr></thead><tbody>
-    {% for payout in payout_requests %}<tr><td>{{ payout.requested_at|date:'d M Y H:i' }}</td><td class="mono">{{ payout.public_id }}</td><td>{{ payout.payout_method }}</td><td><span class="ow-status {{ payout.status }}">{{ payout.get_status_display }}</span></td><td>{{ payout.currency }} {{ payout.amount|floatformat:2 }}</td><td>{{ payout.payment_reference|default:'—' }}</td></tr>
-    {% empty %}<tr><td colspan="6" class="ow-table-empty">No withdrawal requests yet.</td></tr>{% endfor %}
+    <header><div><span class="ow-eyebrow"><i></i> Billing history</span><h2>Monthly statements</h2></div></header>
+    <div class="ow-table-wrap"><table><thead><tr><th>Period</th><th>Invoice</th><th>Generated</th><th>Status</th><th>Amount</th><th>Reference</th></tr></thead><tbody>
+    {% for payout in payout_requests %}<tr><td>{% if payout.billing_period_start %}{{ payout.billing_period_start|date:'M Y' }}{% else %}Legacy{% endif %}</td><td class="mono">{{ payout.invoice_number|default:payout.public_id }}</td><td>{{ payout.requested_at|date:'d M Y H:i' }}</td><td><span class="ow-status {{ payout.status }}">{{ payout.get_status_display }}</span></td><td>{{ payout.currency }} {{ payout.amount|floatformat:2 }}</td><td>{{ payout.payment_reference|default:'—' }}</td></tr>
+    {% empty %}<tr><td colspan="6" class="ow-table-empty">Your first statement will appear after the month closes.</td></tr>{% endfor %}
     </tbody></table></div>
   </section>
 </section>

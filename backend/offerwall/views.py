@@ -67,6 +67,8 @@ from .forms import (
 from .models import (
     OfferClick,
     OfferConversion,
+    OfferOverride,
+    OfferwallInventoryRule,
     OfferwallAdminPortalAccount,
     PlacementEventPostback,
     PostbackDelivery,
@@ -99,13 +101,20 @@ from .services import (
     create_wall_visit,
     approve_conversion,
     offer_catalog,
+    payout_for,
+    payout_percent_for,
     process_attempt_outcome,
     review_publisher_registration,
     reject_conversion,
     result_url,
     session_url,
 )
-from .wallet import request_withdrawal, transition_payout, wallet_summary
+from .wallet import (
+    generate_due_monthly_billings,
+    request_withdrawal,
+    transition_payout,
+    wallet_summary,
+)
 
 
 USER_ID_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,160}$")
@@ -727,16 +736,77 @@ def admin_portal_dashboard(request):
     return _no_store(render(request, "offerwall/admin_dashboard.html", context))
 
 
-@require_GET
+@require_http_methods(["GET", "POST"])
 def admin_portal_inventory(request):
     account, denied = _admin_portal_or_response(request)
     if denied:
         return denied
+    if request.method == "POST":
+        action = str(request.POST.get("action") or "").strip().lower()
+        survey = get_object_or_404(Survey, pk=request.POST.get("survey_id"))
+        supplier_id = str(request.POST.get("supplier") or "").strip()
+        if action == "set-inventory-state":
+            rule, _ = OfferwallInventoryRule.objects.get_or_create(survey=survey)
+            rule.is_enabled = str(request.POST.get("is_enabled") or "") == "1"
+            rule.admin_note = str(request.POST.get("admin_note") or "").strip()[:500]
+            rule.updated_by = account.user
+            rule.save(update_fields=["is_enabled", "admin_note", "updated_by", "updated_at"])
+            messages.success(
+                request,
+                f"Survey {survey.local_id} is now {'enabled' if rule.is_enabled else 'paused'} on the Offerwall.",
+            )
+        elif action == "save-supplier-rule":
+            publisher = get_object_or_404(Publisher, public_id=supplier_id)
+            raw_payout = str(request.POST.get("payout_percent_override") or "").strip()
+            try:
+                payout_override = (
+                    Decimal(raw_payout).quantize(Decimal("0.01"))
+                    if raw_payout
+                    else None
+                )
+                if payout_override is not None and not Decimal("0") <= payout_override <= Decimal("100"):
+                    raise ValueError
+            except (ArithmeticError, ValueError):
+                messages.error(request, "Supplier payout must be blank or between 0% and 100%.")
+            else:
+                override, _ = OfferOverride.objects.get_or_create(
+                    publisher=publisher,
+                    survey=survey,
+                )
+                override.is_excluded = request.POST.get("allocation") == "excluded"
+                override.payout_percent_override = payout_override
+                override.featured = request.POST.get("featured") == "1"
+                override.save(
+                    update_fields=[
+                        "is_excluded",
+                        "payout_percent_override",
+                        "featured",
+                        "updated_at",
+                    ]
+                )
+                messages.success(
+                    request,
+                    f"{publisher.name} allocation for survey {survey.local_id} was updated.",
+                )
+        else:
+            messages.error(request, "Unknown inventory action.")
+        destination = reverse("offerwall:admin-inventory")
+        if supplier_id:
+            destination = f"{destination}?{urlencode({'supplier': supplier_id})}"
+        return _no_store(HttpResponseRedirect(destination))
+
     surveys = Survey.objects.select_related("client", "integration").all()
     query = str(request.GET.get("q") or "").strip()
     country = str(request.GET.get("country") or "").strip().upper()
     provider = str(request.GET.get("provider") or "").strip()
     status = str(request.GET.get("status") or "").strip().lower()
+    offerwall_state = str(request.GET.get("offerwall") or "").strip().lower()
+    supplier_id = str(request.GET.get("supplier") or "").strip()
+    selected_supplier = None
+    if supplier_id:
+        selected_supplier = Publisher.objects.filter(public_id=supplier_id).first()
+        if selected_supplier is None:
+            supplier_id = ""
     if query:
         surveys = surveys.filter(
             Q(local_id__icontains=query)
@@ -750,15 +820,60 @@ def admin_portal_inventory(request):
         surveys = surveys.filter(company_name=provider)
     if status in {Survey.Status.LIVE, Survey.Status.CLOSED}:
         surveys = surveys.filter(status=status)
+    if offerwall_state == "enabled":
+        surveys = surveys.exclude(offerwall_inventory_rule__is_enabled=False)
+    elif offerwall_state == "paused":
+        surveys = surveys.filter(offerwall_inventory_rule__is_enabled=False)
+    else:
+        offerwall_state = ""
     surveys = surveys.order_by("-updated_at")
     paginator = Paginator(surveys, 30)
     page = paginator.get_page(request.GET.get("page"))
-    live_inventory = Survey.objects.filter(status=Survey.Status.LIVE, remaining__gt=0, cpi__gt=0)
+    page_ids = [survey.pk for survey in page.object_list]
+    rules = {
+        rule.survey_id: rule
+        for rule in OfferwallInventoryRule.objects.filter(survey_id__in=page_ids)
+    }
+    overrides = {}
+    if selected_supplier:
+        overrides = {
+            override.survey_id: override
+            for override in OfferOverride.objects.filter(
+                publisher=selected_supplier,
+                survey_id__in=page_ids,
+            )
+        }
+    for survey in page.object_list:
+        rule = rules.get(survey.pk)
+        override = overrides.get(survey.pk)
+        survey.offerwall_enabled = rule.is_enabled if rule else True
+        survey.offerwall_admin_note = rule.admin_note if rule else ""
+        survey.supplier_override = override
+        if selected_supplier:
+            survey.effective_payout_percent = payout_percent_for(selected_supplier, override)
+            survey.effective_platform_cut_percent = (
+                Decimal("100.00") - survey.effective_payout_percent
+            )
+            survey.effective_supplier_payout = payout_for(survey, selected_supplier, override)
+    live_inventory = Survey.objects.filter(
+        status=Survey.Status.LIVE,
+        remaining__gt=0,
+        cpi__gt=0,
+    ).exclude(offerwall_inventory_rule__is_enabled=False)
     context = _admin_base_context(account, "inventory")
     context.update(
         {
             "page": page,
-            "filters": {"q": query, "country": country, "provider": provider, "status": status},
+            "filters": {
+                "q": query,
+                "country": country,
+                "provider": provider,
+                "status": status,
+                "offerwall": offerwall_state,
+                "supplier": supplier_id,
+            },
+            "publishers": Publisher.objects.order_by("name"),
+            "selected_supplier": selected_supplier,
             "countries": Survey.objects.exclude(country_code="").values_list("country_code", flat=True).distinct().order_by("country_code"),
             "providers": Survey.objects.exclude(company_name="").values_list("company_name", flat=True).distinct().order_by("company_name"),
             "inventory_stats": {
@@ -983,6 +1098,116 @@ def admin_portal_conversions(request):
         }
     )
     return _no_store(render(request, "offerwall/admin_conversions.html", context))
+
+
+@require_http_methods(["GET", "POST"])
+def admin_portal_billing(request):
+    account, denied = _admin_portal_or_response(request)
+    if denied:
+        return denied
+    if request.method == "POST":
+        action = str(request.POST.get("action") or "").strip().lower()
+        try:
+            if action == "generate-monthly":
+                result = generate_due_monthly_billings()
+                messages.success(
+                    request,
+                    f"Monthly billing completed: {result['created']} generated, {result['skipped']} unchanged.",
+                )
+            else:
+                statement = PublisherPayoutRequest.objects.get(
+                    public_id=request.POST.get("statement_id")
+                )
+                status_map = {
+                    "approve": PublisherPayoutRequest.Status.APPROVED,
+                    "process": PublisherPayoutRequest.Status.PROCESSING,
+                    "paid": PublisherPayoutRequest.Status.PAID,
+                    "reject": PublisherPayoutRequest.Status.REJECTED,
+                    "cancel": PublisherPayoutRequest.Status.CANCELED,
+                }
+                if action not in status_map:
+                    raise ValidationError("Unknown billing action.")
+                transition_payout(
+                    statement,
+                    status_map[action],
+                    reviewer=account.user,
+                    payment_reference=request.POST.get("payment_reference", ""),
+                    admin_note=request.POST.get("admin_note", ""),
+                )
+                messages.success(
+                    request,
+                    f"Billing {statement.invoice_number or statement.public_id} moved to {status_map[action]}.",
+                )
+        except PublisherPayoutRequest.DoesNotExist:
+            messages.error(request, "Billing statement could not be found.")
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+        return _no_store(HttpResponseRedirect(reverse("offerwall:admin-billing")))
+
+    statements = PublisherPayoutRequest.objects.select_related(
+        "publisher", "reviewed_by"
+    )
+    status = str(request.GET.get("status") or "all").strip().lower()
+    publisher_id = str(request.GET.get("publisher") or "").strip()
+    query = str(request.GET.get("q") or "").strip()[:160]
+    allowed_statuses = {value for value, _ in PublisherPayoutRequest.Status.choices}
+    if status != "all" and status in allowed_statuses:
+        statements = statements.filter(status=status)
+    else:
+        status = "all"
+    if publisher_id:
+        statements = statements.filter(publisher__public_id=publisher_id)
+    if query:
+        statements = statements.filter(
+            Q(invoice_number__icontains=query)
+            | Q(publisher__name__icontains=query)
+            | Q(payment_reference__icontains=query)
+        )
+    totals = PublisherPayoutRequest.objects.aggregate(
+        generated=Count("id"),
+        pending=Count(
+            "id",
+            filter=Q(
+                status__in=[
+                    PublisherPayoutRequest.Status.PENDING,
+                    PublisherPayoutRequest.Status.APPROVED,
+                    PublisherPayoutRequest.Status.PROCESSING,
+                ]
+            ),
+        ),
+        pending_value=Coalesce(
+            Sum(
+                "amount",
+                filter=Q(
+                    status__in=[
+                        PublisherPayoutRequest.Status.PENDING,
+                        PublisherPayoutRequest.Status.APPROVED,
+                        PublisherPayoutRequest.Status.PROCESSING,
+                    ]
+                ),
+            ),
+            Value(Decimal("0.00")),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        ),
+        paid_value=Coalesce(
+            Sum("amount", filter=Q(status=PublisherPayoutRequest.Status.PAID)),
+            Value(Decimal("0.00")),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        ),
+    )
+    context = _admin_base_context(account, "billing")
+    context.update(
+        {
+            "page": Paginator(statements.order_by("-requested_at"), 30).get_page(
+                request.GET.get("page")
+            ),
+            "billing_stats": totals,
+            "filters": {"status": status, "publisher": publisher_id, "q": query},
+            "status_choices": PublisherPayoutRequest.Status.choices,
+            "publishers": Publisher.objects.order_by("name"),
+        }
+    )
+    return _no_store(render(request, "offerwall/admin_billing.html", context))
 
 
 @require_GET
@@ -3119,7 +3344,6 @@ def publisher_dashboard(request):
             "placement_count": publisher.placements.count(),
             "ledger_entries": publisher.reward_ledger.select_related("survey")[:25],
             "payout_requests": publisher.payout_requests.all()[:20],
-            "payout_methods": ("Bank transfer", "PayPal", "Wise", "Other"),
         },
     )
     return _no_store(response)
@@ -3166,6 +3390,13 @@ def wallet_api(request):
     payouts = [
         {
             "id": str(item.public_id),
+            "invoice_number": item.invoice_number,
+            "billing_period_start": (
+                item.billing_period_start.isoformat() if item.billing_period_start else None
+            ),
+            "billing_period_end": (
+                item.billing_period_end.isoformat() if item.billing_period_end else None
+            ),
             "amount": str(item.amount),
             "currency": item.currency,
             "status": item.status,
@@ -3184,6 +3415,7 @@ def wallet_api(request):
                     for key, value in summary.items()
                 },
                 "payout_requests": payouts,
+                "billing_statements": payouts,
             }
         )
     )

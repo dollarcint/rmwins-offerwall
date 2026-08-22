@@ -566,4 +566,9 @@ CELERY_BEAT_SCHEDULE = {
         "task": "offerwall.release_due_rewards",
         "schedule": float(OFFERWALL_REWARD_RELEASE_INTERVAL_SECONDS),
     },
+    "generate-offerwall-monthly-billings": {
+        "task": "offerwall.generate_monthly_billings",
+        # The task is idempotent and always targets the previous closed month.
+        "schedule": 86400.0,
+    },
 } if ENABLE_SCHEDULED_JOBS else {}

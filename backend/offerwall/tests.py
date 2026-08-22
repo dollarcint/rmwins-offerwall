@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 import re
 from unittest.mock import patch
@@ -20,6 +20,7 @@ from .models import (
     OfferConversionEvent,
     OfferOverride,
     OfferwallAdminPortalAccount,
+    OfferwallInventoryRule,
     PlacementEventPostback,
     PostbackDelivery,
     Publisher,
@@ -50,7 +51,12 @@ from .services import (
     session_url,
 )
 from .tasks import _validated_callback_url, deliver_postback_task
-from .wallet import request_withdrawal, transition_payout, wallet_summary
+from .wallet import (
+    generate_monthly_billing,
+    request_withdrawal,
+    transition_payout,
+    wallet_summary,
+)
 
 
 OFFERWALL_SETTINGS = {
@@ -716,6 +722,130 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(activity.status_code, 200)
         self.assertContains(activity, "Offer activity")
 
+    def test_admin_inventory_controls_global_and_supplier_offer_rules(self):
+        admin_user = get_user_model().objects.create_user(
+            username="inventory-admin",
+            password="Inventory-Admin-9472",
+            is_staff=True,
+        )
+        OfferwallAdminPortalAccount.objects.create(
+            user=admin_user,
+            must_change_password=False,
+        )
+        self.client.post(
+            reverse("offerwall:admin-login"),
+            {"username": admin_user.username, "password": "Inventory-Admin-9472"},
+        )
+        visit = self._visit()
+        self.assertEqual(len(offer_catalog(self.publisher, visit)), 1)
+
+        paused = self.client.post(
+            reverse("offerwall:admin-inventory"),
+            {
+                "action": "set-inventory-state",
+                "survey_id": self.survey.pk,
+                "is_enabled": "0",
+            },
+        )
+        self.assertEqual(paused.status_code, 302)
+        self.assertFalse(
+            OfferwallInventoryRule.objects.get(survey=self.survey).is_enabled
+        )
+        self.assertEqual(offer_catalog(self.publisher, visit), [])
+
+        self.client.post(
+            reverse("offerwall:admin-inventory"),
+            {
+                "action": "set-inventory-state",
+                "survey_id": self.survey.pk,
+                "is_enabled": "1",
+            },
+        )
+        changed = self.client.post(
+            reverse("offerwall:admin-inventory"),
+            {
+                "action": "save-supplier-rule",
+                "survey_id": self.survey.pk,
+                "supplier": self.publisher.public_id,
+                "allocation": "assigned",
+                "payout_percent_override": "60.00",
+                "featured": "1",
+            },
+        )
+        self.assertEqual(changed.status_code, 302)
+        offer = offer_catalog(self.publisher, visit)[0]
+        self.assertEqual(offer["reward"], Decimal("3.00"))
+        self.assertTrue(offer["featured"])
+
+        self.client.post(
+            reverse("offerwall:admin-inventory"),
+            {
+                "action": "save-supplier-rule",
+                "survey_id": self.survey.pk,
+                "supplier": self.publisher.public_id,
+                "allocation": "excluded",
+                "payout_percent_override": "60.00",
+            },
+        )
+        self.assertEqual(offer_catalog(self.publisher, visit), [])
+
+    def test_admin_monthly_billing_generates_and_settles_statement(self):
+        admin_user = get_user_model().objects.create_user(
+            username="billing-admin",
+            password="Billing-Admin-9472",
+            is_staff=True,
+        )
+        OfferwallAdminPortalAccount.objects.create(
+            user=admin_user,
+            must_change_password=False,
+        )
+        self.client.post(
+            reverse("offerwall:admin-login"),
+            {"username": admin_user.username, "password": "Billing-Admin-9472"},
+        )
+        self._credit_click()
+        RewardLedgerEntry.objects.filter(
+            publisher=self.publisher,
+            entry_type=RewardLedgerEntry.EntryType.CREDIT,
+        ).update(released_at=timezone.now() - timedelta(days=62))
+
+        generated = self.client.post(
+            reverse("offerwall:admin-billing"),
+            {"action": "generate-monthly"},
+        )
+        self.assertRedirects(
+            generated,
+            reverse("offerwall:admin-billing"),
+            fetch_redirect_response=False,
+        )
+        statement = PublisherPayoutRequest.objects.get(publisher=self.publisher)
+        page = self.client.get(reverse("offerwall:admin-billing"))
+        self.assertContains(page, statement.invoice_number)
+        self.assertContains(page, "USD 3.50")
+
+        for action, expected_status in (
+            ("approve", PublisherPayoutRequest.Status.APPROVED),
+            ("process", PublisherPayoutRequest.Status.PROCESSING),
+        ):
+            response = self.client.post(
+                reverse("offerwall:admin-billing"),
+                {"action": action, "statement_id": statement.public_id},
+            )
+            self.assertEqual(response.status_code, 302)
+            statement.refresh_from_db()
+            self.assertEqual(statement.status, expected_status)
+        self.client.post(
+            reverse("offerwall:admin-billing"),
+            {
+                "action": "paid",
+                "statement_id": statement.public_id,
+                "payment_reference": "BANK-ADMIN-123",
+            },
+        )
+        statement.refresh_from_db()
+        self.assertEqual(statement.status, PublisherPayoutRequest.Status.PAID)
+        self.assertEqual(statement.payment_reference, "BANK-ADMIN-123")
+
     def test_supplier_registration_creates_pending_inactive_account(self):
         response = self.client.post(
             reverse("offerwall:supplier-signup"),
@@ -782,7 +912,7 @@ class OfferwallFlowTests(TestCase):
             fetch_redirect_response=False,
         )
         dashboard = self.client.get(reverse("offerwall:publisher-dashboard"))
-        self.assertContains(dashboard, "Available balance")
+        self.assertContains(dashboard, "Unbilled balance")
         self.assertContains(dashboard, "Approved Supplier")
         home = self.client.get(reverse("home"))
         self.assertEqual(home.status_code, 200)
@@ -869,7 +999,7 @@ class OfferwallFlowTests(TestCase):
         )
         self.assertContains(
             self.client.get(reverse("offerwall:publisher-dashboard")),
-            "Available balance",
+            "Unbilled balance",
         )
 
         self.client.force_login(operator)
@@ -1647,21 +1777,30 @@ class OfferwallFlowTests(TestCase):
         process_attempt_outcome(click.attempt_id)
         return click
 
-    def test_wallet_reserves_withdrawal_and_tracks_paid_balance(self):
+    def test_monthly_billing_locks_full_balance_and_tracks_payment(self):
         self._credit_click()
+        RewardLedgerEntry.objects.filter(
+            publisher=self.publisher,
+            entry_type=RewardLedgerEntry.EntryType.CREDIT,
+        ).update(
+            released_at=timezone.make_aware(datetime(2026, 7, 15, 12, 0))
+        )
         initial = wallet_summary(self.publisher)
         self.assertEqual(initial["net_earnings"], Decimal("3.50"))
         self.assertEqual(initial["available"], Decimal("3.50"))
 
-        payout = request_withdrawal(
+        payout, created = generate_monthly_billing(
             self.publisher,
-            amount="2.00",
-            payout_method="Bank transfer",
-            publisher_note="Primary account",
+            reference_date=date(2026, 8, 1),
         )
+        self.assertTrue(created)
+        self.assertEqual(payout.invoice_number, "RMW-202607-000001")
+        self.assertEqual(payout.amount, Decimal("3.50"))
+        self.assertEqual(payout.billing_period_start, date(2026, 7, 1))
+        self.assertEqual(payout.billing_period_end, date(2026, 7, 31))
         reserved = wallet_summary(self.publisher)
-        self.assertEqual(reserved["reserved"], Decimal("2.00"))
-        self.assertEqual(reserved["available"], Decimal("1.50"))
+        self.assertEqual(reserved["reserved"], Decimal("3.50"))
+        self.assertEqual(reserved["available"], Decimal("0.00"))
 
         payout = transition_payout(payout, PublisherPayoutRequest.Status.APPROVED)
         payout = transition_payout(payout, PublisherPayoutRequest.Status.PROCESSING)
@@ -1674,21 +1813,55 @@ class OfferwallFlowTests(TestCase):
         )
         paid = wallet_summary(self.publisher)
         self.assertEqual(paid["reserved"], Decimal("0.00"))
-        self.assertEqual(paid["paid"], Decimal("2.00"))
-        self.assertEqual(paid["available"], Decimal("1.50"))
+        self.assertEqual(paid["paid"], Decimal("3.50"))
+        self.assertEqual(paid["available"], Decimal("0.00"))
 
-    def test_rejected_withdrawal_releases_balance_and_overspend_is_blocked(self):
+    def test_monthly_billing_is_idempotent_and_rejection_carries_forward(self):
         self._credit_click()
-        with self.assertRaisesMessage(ValidationError, "exceeds"):
-            request_withdrawal(
-                self.publisher, amount="4.00", payout_method="Wise"
-            )
-        payout = request_withdrawal(
-            self.publisher, amount="3.00", payout_method="Wise"
+        RewardLedgerEntry.objects.filter(
+            publisher=self.publisher,
+            entry_type=RewardLedgerEntry.EntryType.CREDIT,
+        ).update(
+            released_at=timezone.make_aware(datetime(2026, 7, 15, 12, 0))
         )
-        self.assertEqual(wallet_summary(self.publisher)["available"], Decimal("0.50"))
+        payout, created = generate_monthly_billing(
+            self.publisher,
+            reference_date=date(2026, 8, 1),
+        )
+        duplicate, duplicate_created = generate_monthly_billing(
+            self.publisher,
+            reference_date=date(2026, 8, 15),
+        )
+        self.assertTrue(created)
+        self.assertFalse(duplicate_created)
+        self.assertEqual(duplicate.pk, payout.pk)
         transition_payout(payout, PublisherPayoutRequest.Status.REJECTED)
         self.assertEqual(wallet_summary(self.publisher)["available"], Decimal("3.50"))
+        carried, carried_created = generate_monthly_billing(
+            self.publisher,
+            reference_date=date(2026, 9, 1),
+        )
+        self.assertTrue(carried_created)
+        self.assertEqual(carried.amount, Decimal("3.50"))
+        self.assertEqual(carried.invoice_number, "RMW-202608-000001")
+
+    def test_manual_withdrawal_is_disabled(self):
+        self._credit_click()
+        with self.assertRaisesMessage(ValidationError, "automatically"):
+            request_withdrawal(
+                self.publisher,
+                amount="3.50",
+                payout_method="Wise",
+            )
+
+    def test_monthly_billing_excludes_rewards_released_after_period_cutoff(self):
+        self._credit_click()
+        statement, created = generate_monthly_billing(
+            self.publisher,
+            reference_date=date(2026, 8, 1),
+        )
+        self.assertIsNone(statement)
+        self.assertFalse(created)
 
     def test_signed_portal_access_is_one_time_and_creates_private_session(self):
         timestamp = int(timezone.now().timestamp())
@@ -1707,7 +1880,8 @@ class OfferwallFlowTests(TestCase):
         )
         dashboard = self.client.get(reverse("offerwall:publisher-dashboard"))
         self.assertEqual(dashboard.status_code, 200)
-        self.assertContains(dashboard, "Available balance")
+        self.assertContains(dashboard, "Unbilled balance")
+        self.assertContains(dashboard, "Automatic monthly billing")
         self.assertContains(dashboard, self.publisher.name)
 
         replay_client = self.client_class()
@@ -1743,7 +1917,7 @@ class OfferwallFlowTests(TestCase):
             403,
         )
 
-    def test_portal_submits_withdrawal_and_wallet_api_reports_it(self):
+    def test_portal_rejects_manual_withdrawal_and_wallet_api_reports_monthly_billing(self):
         self._credit_click()
         timestamp = int(timezone.now().timestamp())
         nonce = "withdraw_portal_nonce_123"
@@ -1772,9 +1946,9 @@ class OfferwallFlowTests(TestCase):
         self.assertRedirects(
             response, reverse("offerwall:publisher-dashboard"), fetch_redirect_response=False
         )
-        payout = PublisherPayoutRequest.objects.get()
-        self.assertEqual(payout.amount, Decimal("2.50"))
-        self.assertEqual(payout.status, PublisherPayoutRequest.Status.PENDING)
+        self.assertFalse(PublisherPayoutRequest.objects.exists())
+        dashboard = self.client.get(reverse("offerwall:publisher-dashboard"))
+        self.assertContains(dashboard, "Manual withdrawals are disabled")
 
         api_response = self.client.get(
             reverse("offerwall:wallet-api"),
@@ -1782,8 +1956,9 @@ class OfferwallFlowTests(TestCase):
         )
         self.assertEqual(api_response.status_code, 200)
         payload = api_response.json()
-        self.assertEqual(payload["wallet"]["available"], "1.00")
-        self.assertEqual(payload["payout_requests"][0]["id"], str(payout.public_id))
+        self.assertEqual(payload["wallet"]["available"], "3.50")
+        self.assertEqual(payload["billing_statements"], [])
+        self.assertEqual(payload["payout_requests"], [])
 
 
 @override_settings(

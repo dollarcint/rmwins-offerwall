@@ -13,6 +13,7 @@ from .models import (
     OfferConversion,
     OfferConversionEvent,
     OfferOverride,
+    OfferwallInventoryRule,
     OfferwallAdminPortalAccount,
     PlacementEventPostback,
     PostbackDelivery,
@@ -32,6 +33,14 @@ from .wallet import transition_payout, wallet_summary
 admin.site.site_header = "RM Wins Offerwall Administration"
 admin.site.site_title = "RM Wins Offerwall Admin"
 admin.site.index_title = "Offerwall operations"
+
+
+@admin.register(OfferwallInventoryRule)
+class OfferwallInventoryRuleAdmin(admin.ModelAdmin):
+    list_display = ["survey", "is_enabled", "updated_by", "updated_at"]
+    list_filter = ["is_enabled", "updated_at"]
+    search_fields = ["survey__local_id", "survey__name", "survey__company_name"]
+    autocomplete_fields = ["survey", "updated_by"]
 
 
 @admin.register(OfferwallAdminPortalAccount)
@@ -549,32 +558,32 @@ def _transition_selected(modeladmin, request, queryset, status):
         else:
             updated += 1
     if updated:
-        modeladmin.message_user(request, f"Updated {updated} payout request(s).")
+        modeladmin.message_user(request, f"Updated {updated} monthly billing statement(s).")
     if errors:
         modeladmin.message_user(request, " | ".join(errors[:5]), level=messages.ERROR)
 
 
-@admin.action(description="Approve selected pending payouts")
+@admin.action(description="Approve selected monthly billing statements")
 def approve_payouts(modeladmin, request, queryset):
     _transition_selected(modeladmin, request, queryset, PublisherPayoutRequest.Status.APPROVED)
 
 
-@admin.action(description="Move selected approved payouts to processing")
+@admin.action(description="Move selected billing statements to processing")
 def process_payouts(modeladmin, request, queryset):
     _transition_selected(modeladmin, request, queryset, PublisherPayoutRequest.Status.PROCESSING)
 
 
-@admin.action(description="Mark selected processing payouts paid (reference required)")
+@admin.action(description="Mark selected billing statements paid (reference required)")
 def mark_payouts_paid(modeladmin, request, queryset):
     _transition_selected(modeladmin, request, queryset, PublisherPayoutRequest.Status.PAID)
 
 
-@admin.action(description="Reject selected active payouts")
+@admin.action(description="Reject selected active billing statements")
 def reject_payouts(modeladmin, request, queryset):
     _transition_selected(modeladmin, request, queryset, PublisherPayoutRequest.Status.REJECTED)
 
 
-@admin.action(description="Cancel selected pending/approved payouts")
+@admin.action(description="Cancel selected pending/approved billing statements")
 def cancel_payouts(modeladmin, request, queryset):
     _transition_selected(modeladmin, request, queryset, PublisherPayoutRequest.Status.CANCELED)
 
@@ -582,8 +591,10 @@ def cancel_payouts(modeladmin, request, queryset):
 @admin.register(PublisherPayoutRequest)
 class PublisherPayoutRequestAdmin(admin.ModelAdmin):
     list_display = [
-        "public_id",
+        "invoice_number",
         "publisher",
+        "billing_period_start",
+        "billing_period_end",
         "amount",
         "currency",
         "status",
@@ -591,16 +602,21 @@ class PublisherPayoutRequestAdmin(admin.ModelAdmin):
         "requested_at",
         "paid_at",
     ]
-    list_filter = ["status", "currency", "payout_method", "requested_at"]
+    list_filter = ["status", "currency", "billing_period_start", "requested_at"]
     search_fields = [
         "public_id",
+        "invoice_number",
         "publisher__name",
         "publisher__slug",
         "payment_reference",
     ]
     readonly_fields = [
         "public_id",
+        "invoice_number",
         "publisher",
+        "billing_period_start",
+        "billing_period_end",
+        "generated_automatically",
         "amount",
         "currency",
         "status",
@@ -615,7 +631,11 @@ class PublisherPayoutRequestAdmin(admin.ModelAdmin):
     ]
     fields = [
         "public_id",
+        "invoice_number",
         "publisher",
+        "billing_period_start",
+        "billing_period_end",
+        "generated_automatically",
         "amount",
         "currency",
         "status",

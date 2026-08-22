@@ -105,7 +105,8 @@ class Publisher(models.Model):
         validators=[MaxValueValidator(720)],
         help_text=(
             "Hours a verified conversion remains pending before supplier earnings "
-            "become withdrawable. Existing integrations can use zero for immediate release."
+            "become eligible for monthly billing. Existing integrations can use zero "
+            "for immediate release."
         ),
     )
     risk_review_threshold = models.PositiveSmallIntegerField(
@@ -271,6 +272,33 @@ class OfferOverride(models.Model):
 
     def __str__(self):
         return f"{self.publisher.slug} · {self.survey.local_id}"
+
+
+class OfferwallInventoryRule(models.Model):
+    """Offerwall-only availability control that survives provider synchronisation."""
+
+    survey = models.OneToOneField(
+        "surveys.Survey",
+        on_delete=models.CASCADE,
+        related_name="offerwall_inventory_rule",
+    )
+    is_enabled = models.BooleanField(default=True, db_index=True)
+    admin_note = models.CharField(max_length=500, blank=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="updated_offerwall_inventory_rules",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["survey__local_id"]
+
+    def __str__(self):
+        return f"{self.survey.local_id} · {'enabled' if self.is_enabled else 'paused'}"
 
 
 class PublisherPlacement(models.Model):
@@ -879,7 +907,7 @@ class RewardLedgerEntry(models.Model):
 
 
 class PublisherPayoutRequest(models.Model):
-    """Publisher withdrawal with reserved-balance and staff review state."""
+    """System-generated monthly supplier billing statement."""
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending review"
@@ -890,9 +918,13 @@ class PublisherPayoutRequest(models.Model):
         CANCELED = "canceled", "Canceled"
 
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    invoice_number = models.CharField(max_length=40, unique=True, null=True, blank=True)
     publisher = models.ForeignKey(
         Publisher, on_delete=models.PROTECT, related_name="payout_requests"
     )
+    billing_period_start = models.DateField(null=True, blank=True, db_index=True)
+    billing_period_end = models.DateField(null=True, blank=True)
+    generated_automatically = models.BooleanField(default=False)
     amount = models.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -920,11 +952,18 @@ class PublisherPayoutRequest(models.Model):
     )
 
     class Meta:
+        verbose_name = "Monthly billing statement"
+        verbose_name_plural = "Monthly billing statements"
         ordering = ["-requested_at"]
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(amount__gt=0), name="offerwall_payout_positive_amount"
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["publisher", "currency", "billing_period_start"],
+                condition=models.Q(billing_period_start__isnull=False),
+                name="unique_publisher_monthly_billing",
+            ),
         ]
         indexes = [
             models.Index(
@@ -934,7 +973,8 @@ class PublisherPayoutRequest(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.publisher.slug} · {self.amount} {self.currency} · {self.status}"
+        reference = self.invoice_number or self.public_id
+        return f"{reference} · {self.publisher.slug} · {self.amount} {self.currency}"
 
 
 class PostbackDelivery(models.Model):
