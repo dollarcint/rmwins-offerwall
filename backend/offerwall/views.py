@@ -9,7 +9,7 @@ import re
 import secrets
 import uuid
 from datetime import datetime, time, timedelta, timezone as datetime_timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import urlencode, urlparse
 
 import requests
@@ -743,18 +743,155 @@ def admin_portal_inventory(request):
         return denied
     if request.method == "POST":
         action = str(request.POST.get("action") or "").strip().lower()
-        survey = get_object_or_404(Survey, pk=request.POST.get("survey_id"))
         supplier_id = str(request.POST.get("supplier") or "").strip()
+        return_filters = {
+            key: str(request.POST.get(key) or "").strip()
+            for key in (
+                "q",
+                "country",
+                "provider",
+                "source",
+                "status",
+                "offerwall",
+                "supplier",
+                "page",
+            )
+        }
+        destination = reverse("offerwall:admin-inventory")
+
+        def redirect_to_inventory():
+            query_string = urlencode(
+                {key: value for key, value in return_filters.items() if value}
+            )
+            return _no_store(
+                HttpResponseRedirect(
+                    f"{destination}?{query_string}" if query_string else destination
+                )
+            )
+
+        def parse_cut(raw_value):
+            value = str(raw_value or "").strip()
+            if not value:
+                return None
+            try:
+                cut = Decimal(value).quantize(Decimal("0.01"))
+                if not Decimal("0") <= cut <= Decimal("100"):
+                    raise ValueError
+            except (ArithmeticError, ValueError) as exc:
+                raise ValidationError("RM Wins cut must be between 0% and 100%.") from exc
+            return cut
+
+        if action in {
+            "bulk-enable",
+            "bulk-pause",
+            "bulk-set-cut",
+            "bulk-assign",
+            "bulk-exclude",
+        }:
+            selected_ids = list(dict.fromkeys(request.POST.getlist("survey_ids")))
+            if not selected_ids:
+                messages.error(request, "Select at least one survey before applying a bulk action.")
+                return redirect_to_inventory()
+            if len(selected_ids) > 500:
+                messages.error(request, "A maximum of 500 surveys can be updated at once.")
+                return redirect_to_inventory()
+            selected_surveys = list(Survey.objects.filter(pk__in=selected_ids))
+            if not selected_surveys:
+                messages.error(request, "The selected surveys no longer exist.")
+                return redirect_to_inventory()
+            bulk_cut = None
+            if action == "bulk-set-cut":
+                try:
+                    bulk_cut = parse_cut(request.POST.get("bulk_platform_cut_percent"))
+                except ValidationError as exc:
+                    messages.error(request, exc.messages[0])
+                    return redirect_to_inventory()
+            publisher = None
+            if action in {"bulk-assign", "bulk-exclude"}:
+                publisher = Publisher.objects.filter(public_id=supplier_id).first()
+                if publisher is None:
+                    messages.error(request, "Select a supplier before changing allocations.")
+                    return redirect_to_inventory()
+            with transaction.atomic():
+                if action in {"bulk-enable", "bulk-pause", "bulk-set-cut"}:
+                    for survey in selected_surveys:
+                        rule, _ = OfferwallInventoryRule.objects.get_or_create(survey=survey)
+                        update_fields = ["updated_by", "updated_at"]
+                        rule.updated_by = account.user
+                        if action in {"bulk-enable", "bulk-pause"}:
+                            rule.is_enabled = action == "bulk-enable"
+                            update_fields.append("is_enabled")
+                        else:
+                            rule.platform_cut_percent = bulk_cut
+                            update_fields.append("platform_cut_percent")
+                        rule.save(update_fields=update_fields)
+                else:
+                    excluded = action == "bulk-exclude"
+                    for survey in selected_surveys:
+                        override, _ = OfferOverride.objects.get_or_create(
+                            publisher=publisher,
+                            survey=survey,
+                        )
+                        if override.is_excluded != excluded:
+                            override.is_excluded = excluded
+                            override.save(update_fields=["is_excluded", "updated_at"])
+            action_labels = {
+                "bulk-enable": "enabled",
+                "bulk-pause": "paused",
+                "bulk-set-cut": (
+                    f"set to {bulk_cut}% RM Wins cut"
+                    if bulk_cut is not None
+                    else "reset to supplier defaults"
+                ),
+                "bulk-assign": f"assigned to {publisher.name}" if publisher else "assigned",
+                "bulk-exclude": f"excluded for {publisher.name}" if publisher else "excluded",
+            }
+            messages.success(
+                request,
+                f"{len(selected_surveys)} surveys were {action_labels[action]}.",
+            )
+            return redirect_to_inventory()
+
+        survey = get_object_or_404(Survey, pk=request.POST.get("survey_id"))
         if action == "set-inventory-state":
             rule, _ = OfferwallInventoryRule.objects.get_or_create(survey=survey)
             rule.is_enabled = str(request.POST.get("is_enabled") or "") == "1"
-            rule.admin_note = str(request.POST.get("admin_note") or "").strip()[:500]
             rule.updated_by = account.user
-            rule.save(update_fields=["is_enabled", "admin_note", "updated_by", "updated_at"])
+            update_fields = ["is_enabled", "updated_by", "updated_at"]
+            if "admin_note" in request.POST:
+                rule.admin_note = str(request.POST.get("admin_note") or "").strip()[:500]
+                update_fields.append("admin_note")
+            rule.save(update_fields=update_fields)
             messages.success(
                 request,
                 f"Survey {survey.local_id} is now {'enabled' if rule.is_enabled else 'paused'} on the Offerwall.",
             )
+        elif action == "save-global-rule":
+            try:
+                platform_cut = parse_cut(request.POST.get("platform_cut_percent"))
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0])
+            else:
+                rule, _ = OfferwallInventoryRule.objects.get_or_create(survey=survey)
+                rule.platform_cut_percent = platform_cut
+                rule.admin_note = str(request.POST.get("admin_note") or "").strip()[:500]
+                rule.updated_by = account.user
+                rule.save(
+                    update_fields=[
+                        "platform_cut_percent",
+                        "admin_note",
+                        "updated_by",
+                        "updated_at",
+                    ]
+                )
+                messages.success(
+                    request,
+                    (
+                        f"Survey {survey.local_id} RM Wins cut is now {platform_cut}%."
+                        if platform_cut is not None
+                        else f"Survey {survey.local_id} now uses supplier default economics."
+                    ),
+                )
         elif action == "save-supplier-rule":
             publisher = get_object_or_404(Publisher, public_id=supplier_id)
             raw_payout = str(request.POST.get("payout_percent_override") or "").strip()
@@ -790,15 +927,13 @@ def admin_portal_inventory(request):
                 )
         else:
             messages.error(request, "Unknown inventory action.")
-        destination = reverse("offerwall:admin-inventory")
-        if supplier_id:
-            destination = f"{destination}?{urlencode({'supplier': supplier_id})}"
-        return _no_store(HttpResponseRedirect(destination))
+        return redirect_to_inventory()
 
     surveys = Survey.objects.select_related("client", "integration").all()
     query = str(request.GET.get("q") or "").strip()
     country = str(request.GET.get("country") or "").strip().upper()
     provider = str(request.GET.get("provider") or "").strip()
+    inventory_source = str(request.GET.get("source") or "").strip().lower()
     status = str(request.GET.get("status") or "").strip().lower()
     offerwall_state = str(request.GET.get("offerwall") or "").strip().lower()
     supplier_id = str(request.GET.get("supplier") or "").strip()
@@ -818,6 +953,10 @@ def admin_portal_inventory(request):
         surveys = surveys.filter(country_code=country)
     if provider:
         surveys = surveys.filter(company_name=provider)
+    if inventory_source in Survey.InventorySource.values:
+        surveys = surveys.filter(inventory_source=inventory_source)
+    else:
+        inventory_source = ""
     if status in {Survey.Status.LIVE, Survey.Status.CLOSED}:
         surveys = surveys.filter(status=status)
     if offerwall_state == "enabled":
@@ -848,13 +987,37 @@ def admin_portal_inventory(request):
         override = overrides.get(survey.pk)
         survey.offerwall_enabled = rule.is_enabled if rule else True
         survey.offerwall_admin_note = rule.admin_note if rule else ""
+        survey.platform_cut_percent = rule.platform_cut_percent if rule else None
+        survey.global_supplier_percent = (
+            Decimal("100.00") - rule.platform_cut_percent
+            if rule and rule.platform_cut_percent is not None
+            else None
+        )
+        survey.global_supplier_payout = (
+            (survey.cpi * survey.global_supplier_percent / Decimal("100")).quantize(
+                Decimal("0.01"),
+                rounding=ROUND_HALF_UP,
+            )
+            if survey.cpi is not None and survey.global_supplier_percent is not None
+            else None
+        )
         survey.supplier_override = override
         if selected_supplier:
-            survey.effective_payout_percent = payout_percent_for(selected_supplier, override)
+            survey.effective_payout_percent = payout_percent_for(
+                selected_supplier,
+                override,
+                survey=survey,
+            )
             survey.effective_platform_cut_percent = (
                 Decimal("100.00") - survey.effective_payout_percent
             )
             survey.effective_supplier_payout = payout_for(survey, selected_supplier, override)
+            if override and override.payout_percent_override is not None:
+                survey.payout_rule_source = "Supplier override"
+            elif rule and rule.platform_cut_percent is not None:
+                survey.payout_rule_source = "RM Wins survey cut"
+            else:
+                survey.payout_rule_source = "Supplier default"
     live_inventory = Survey.objects.filter(
         status=Survey.Status.LIVE,
         remaining__gt=0,
@@ -868,6 +1031,7 @@ def admin_portal_inventory(request):
                 "q": query,
                 "country": country,
                 "provider": provider,
+                "source": inventory_source,
                 "status": status,
                 "offerwall": offerwall_state,
                 "supplier": supplier_id,
@@ -876,6 +1040,7 @@ def admin_portal_inventory(request):
             "selected_supplier": selected_supplier,
             "countries": Survey.objects.exclude(country_code="").values_list("country_code", flat=True).distinct().order_by("country_code"),
             "providers": Survey.objects.exclude(company_name="").values_list("company_name", flat=True).distinct().order_by("company_name"),
+            "inventory_sources": Survey.InventorySource.choices,
             "inventory_stats": {
                 "live": live_inventory.count(),
                 "countries": live_inventory.exclude(country_code="").values("country_code").distinct().count(),

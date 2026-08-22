@@ -37,7 +37,13 @@ admin.site.index_title = "Offerwall operations"
 
 @admin.register(OfferwallInventoryRule)
 class OfferwallInventoryRuleAdmin(admin.ModelAdmin):
-    list_display = ["survey", "is_enabled", "updated_by", "updated_at"]
+    list_display = [
+        "survey",
+        "is_enabled",
+        "platform_cut_percent",
+        "updated_by",
+        "updated_at",
+    ]
     list_filter = ["is_enabled", "updated_at"]
     search_fields = ["survey__local_id", "survey__name", "survey__company_name"]
     autocomplete_fields = ["survey", "updated_by"]

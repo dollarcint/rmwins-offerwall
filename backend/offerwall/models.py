@@ -283,6 +283,17 @@ class OfferwallInventoryRule(models.Model):
         related_name="offerwall_inventory_rule",
     )
     is_enabled = models.BooleanField(default=True, db_index=True)
+    platform_cut_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=PERCENTAGE_VALIDATORS,
+        help_text=(
+            "Optional survey-level RM Wins cut. Blank falls back to the supplier's "
+            "default payout percentage."
+        ),
+    )
     admin_note = models.CharField(max_length=500, blank=True)
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

@@ -17,8 +17,9 @@
   <form method="get" class="rmw-admin-filter-grid rmw-admin-inventory-filters">
     <label class="wide"><span>Search inventory</span><input type="search" name="q" value="{{ filters.q }}" placeholder="Survey ID, name or provider"></label>
     <label><span>Supplier allocation</span><select name="supplier"><option value="">Global inventory only</option>{% for item in publishers %}<option value="{{ item.public_id }}" {% if filters.supplier == item.public_id|stringformat:'s' %}selected{% endif %}>{{ item.name }} · {{ item.publisher_code }}</option>{% endfor %}</select></label>
-    <label><span>Country</span><select name="country"><option value="">All countries</option>{% for item in countries %}<option value="{{ item }}" {% if filters.country == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
-    <label><span>Provider</span><select name="provider"><option value="">All providers</option>{% for item in providers %}<option value="{{ item }}" {% if filters.provider == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+    <label><span>Country</span><input type="search" name="country" value="{{ filters.country }}" list="inventory-countries" placeholder="All countries"><datalist id="inventory-countries">{% for item in countries %}<option value="{{ item }}">{% endfor %}</datalist></label>
+    <label><span>Provider</span><input type="search" name="provider" value="{{ filters.provider }}" list="inventory-providers" placeholder="All providers"><datalist id="inventory-providers">{% for item in providers %}<option value="{{ item }}">{% endfor %}</datalist></label>
+    <label><span>Inventory source</span><select name="source"><option value="">API &amp; manual</option>{% for value,label in inventory_sources %}<option value="{{ value }}" {% if filters.source == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
     <label><span>Provider status</span><select name="status"><option value="">All statuses</option><option value="live" {% if filters.status == 'live' %}selected{% endif %}>Live</option><option value="closed" {% if filters.status == 'closed' %}selected{% endif %}>Closed</option></select></label>
     <label><span>Offerwall state</span><select name="offerwall"><option value="">All states</option><option value="enabled" {% if filters.offerwall == 'enabled' %}selected{% endif %}>Enabled</option><option value="paused" {% if filters.offerwall == 'paused' %}selected{% endif %}>Paused</option></select></label>
     <button type="submit">Apply filters</button>
@@ -26,12 +27,22 @@
   </form>
 </section>
 
-{% if selected_supplier %}<section class="rmw-admin-selection-banner"><div><span>Editing supplier allocation</span><strong>{{ selected_supplier.name }}</strong></div><p>Publisher {{ selected_supplier.publisher_code }} · default payout {{ selected_supplier.payout_percent }}%. Blank survey payout inherits this value.</p></section>{% endif %}
+{% if selected_supplier %}<section class="rmw-admin-selection-banner"><div><span>Editing supplier allocation</span><strong>{{ selected_supplier.name }}</strong></div><p>Publisher {{ selected_supplier.publisher_code }} · payout priority: supplier override → survey RM Wins cut → {{ selected_supplier.payout_percent }}% supplier default.</p></section>{% endif %}
 
 <section class="rmw-admin-card rmw-admin-table-card">
   <div class="rmw-admin-card-head"><div><span>Survey catalog</span><h2>{{ page.paginator.count }} matching surveys</h2></div><small>Page {{ page.number }} of {{ page.paginator.num_pages }}</small></div>
-  <div class="rmw-admin-table-wrap"><table class="rmw-admin-inventory-table"><thead><tr><th>Survey</th><th>Provider</th><th>Market</th><th>Economics</th><th>Provider state</th><th>Offerwall state</th>{% if selected_supplier %}<th>Supplier allocation &amp; cut</th>{% endif %}</tr></thead><tbody>
+  <form method="post" id="inventory-bulk-form" class="rmw-admin-bulk-toolbar">
+    {% csrf_token %}{% include 'offerwall/_admin_inventory_filter_fields.html' %}
+    <div><strong><span id="inventory-selected-count">0</span> selected</strong><small>Actions apply to checked rows on this page</small></div>
+    <button type="submit" name="action" value="bulk-enable">Enable</button>
+    <button type="submit" name="action" value="bulk-pause" class="danger">Pause</button>
+    <label><span>RM Wins cut %</span><input type="number" name="bulk_platform_cut_percent" min="0" max="100" step="0.01" placeholder="Blank = reset"></label>
+    <button type="submit" name="action" value="bulk-set-cut">Apply cut</button>
+    {% if selected_supplier %}<button type="submit" name="action" value="bulk-assign">Assign</button><button type="submit" name="action" value="bulk-exclude" class="danger">Exclude</button>{% endif %}
+  </form>
+  <div class="rmw-admin-table-wrap"><table class="rmw-admin-inventory-table"><thead><tr><th class="rmw-admin-check-cell"><input type="checkbox" id="inventory-check-all" aria-label="Select all surveys on this page"></th><th>Survey</th><th>Provider</th><th>Market</th><th>Economics</th><th>Provider state</th><th>Offerwall state</th><th>RM Wins cut</th>{% if selected_supplier %}<th>Supplier allocation &amp; final CPI</th>{% endif %}</tr></thead><tbody>
     {% for survey in page.object_list %}<tr>
+      <td class="rmw-admin-check-cell"><input type="checkbox" class="inventory-row-check" name="survey_ids" value="{{ survey.pk }}" form="inventory-bulk-form" aria-label="Select survey {{ survey.local_id }}"></td>
       <td><strong>{{ survey.local_id }}</strong><small>{{ survey.name|default:'Untitled survey'|truncatechars:48 }}</small></td>
       <td><strong>{{ survey.company_name|default:'—' }}</strong><small>{{ survey.get_inventory_source_display }}</small></td>
       <td><span class="rmw-admin-country-code">{{ survey.country_code|default:'—' }}</span><small>{{ survey.country|default:'' }}</small></td>
@@ -39,23 +50,46 @@
       <td><span class="rmw-admin-status {% if survey.status == 'live' %}active{% endif %}">{{ survey.get_status_display }}</span><small>{{ survey.updated_at|date:'d M Y, H:i' }}</small></td>
       <td>
         <span class="rmw-admin-status {% if survey.offerwall_enabled %}active{% else %}rejected{% endif %}">{{ survey.offerwall_enabled|yesno:'Enabled,Paused' }}</span>
-        <form method="post" class="rmw-admin-inline-action">{% csrf_token %}<input type="hidden" name="action" value="set-inventory-state"><input type="hidden" name="survey_id" value="{{ survey.pk }}"><input type="hidden" name="supplier" value="{{ filters.supplier }}"><input type="hidden" name="is_enabled" value="{% if survey.offerwall_enabled %}0{% else %}1{% endif %}"><button type="submit" class="{% if survey.offerwall_enabled %}danger{% endif %}">{% if survey.offerwall_enabled %}Pause{% else %}Enable{% endif %}</button></form>
+        <form method="post" class="rmw-admin-inline-action">{% csrf_token %}{% include 'offerwall/_admin_inventory_filter_fields.html' %}<input type="hidden" name="action" value="set-inventory-state"><input type="hidden" name="survey_id" value="{{ survey.pk }}"><input type="hidden" name="is_enabled" value="{% if survey.offerwall_enabled %}0{% else %}1{% endif %}"><button type="submit" class="{% if survey.offerwall_enabled %}danger{% endif %}">{% if survey.offerwall_enabled %}Pause{% else %}Enable{% endif %}</button></form>
       </td>
+      <td><form method="post" class="rmw-admin-global-cut-form">{% csrf_token %}{% include 'offerwall/_admin_inventory_filter_fields.html' %}<input type="hidden" name="action" value="save-global-rule"><input type="hidden" name="survey_id" value="{{ survey.pk }}">
+        <label><span>Platform cut %</span><input type="number" name="platform_cut_percent" min="0" max="100" step="0.01" value="{% if survey.platform_cut_percent != None %}{{ survey.platform_cut_percent }}{% endif %}" placeholder="Supplier default"></label>
+        <label><span>Internal note</span><input type="text" name="admin_note" maxlength="500" value="{{ survey.offerwall_admin_note }}" placeholder="Optional"></label>
+        <div>{% if survey.platform_cut_percent != None %}<small>Default supplier CPI</small><strong>{% if survey.global_supplier_payout != None %}${{ survey.global_supplier_payout|floatformat:2 }}{% else %}—{% endif %}</strong><span>{{ survey.global_supplier_percent }}% supplier</span>{% else %}<small>Economics</small><strong>Supplier default</strong><span>No survey cut override</span>{% endif %}</div>
+        <button type="submit">Save</button>
+      </form></td>
       {% if selected_supplier %}<td>
-        <form method="post" class="rmw-admin-allocation-form">{% csrf_token %}<input type="hidden" name="action" value="save-supplier-rule"><input type="hidden" name="survey_id" value="{{ survey.pk }}"><input type="hidden" name="supplier" value="{{ selected_supplier.public_id }}">
+        <form method="post" class="rmw-admin-allocation-form">{% csrf_token %}{% include 'offerwall/_admin_inventory_filter_fields.html' %}<input type="hidden" name="action" value="save-supplier-rule"><input type="hidden" name="survey_id" value="{{ survey.pk }}">
           <label><span>Allocation</span><select name="allocation"><option value="assigned" {% if not survey.supplier_override or not survey.supplier_override.is_excluded %}selected{% endif %}>Assigned</option><option value="excluded" {% if survey.supplier_override.is_excluded %}selected{% endif %}>Excluded</option></select></label>
           <label><span>Payout %</span><input type="number" name="payout_percent_override" min="0" max="100" step="0.01" value="{% if survey.supplier_override and survey.supplier_override.payout_percent_override != None %}{{ survey.supplier_override.payout_percent_override }}{% endif %}" placeholder="{{ selected_supplier.payout_percent }}"></label>
           <label class="check"><input type="checkbox" name="featured" value="1" {% if survey.supplier_override.featured %}checked{% endif %}><span>Featured</span></label>
-          <div class="rmw-admin-allocation-result"><small>Final payout</small><strong>{% if survey.effective_supplier_payout != None %}{{ selected_supplier.currency }} {{ survey.effective_supplier_payout|floatformat:2 }}{% else %}—{% endif %}</strong><span>{{ survey.effective_payout_percent }}% supplier · {{ survey.effective_platform_cut_percent }}% RM Wins</span></div>
+          <div class="rmw-admin-allocation-result"><small>Final supplier CPI</small><strong>{% if survey.effective_supplier_payout != None %}{{ selected_supplier.currency }} {{ survey.effective_supplier_payout|floatformat:2 }}{% else %}—{% endif %}</strong><span>{{ survey.effective_payout_percent }}% supplier · {{ survey.effective_platform_cut_percent }}% RM Wins · {{ survey.payout_rule_source }}</span></div>
           <button type="submit">Save</button>
         </form>
       </td>{% endif %}
-    </tr>{% empty %}<tr><td colspan="{% if selected_supplier %}7{% else %}6{% endif %}">No surveys match these filters.</td></tr>{% endfor %}
+    </tr>{% empty %}<tr><td colspan="{% if selected_supplier %}9{% else %}8{% endif %}">No surveys match these filters.</td></tr>{% endfor %}
   </tbody></table></div>
   <nav class="rmw-admin-pagination" aria-label="Inventory pages">
-    {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&amp;q={{ filters.q|urlencode }}&amp;country={{ filters.country|urlencode }}&amp;provider={{ filters.provider|urlencode }}&amp;status={{ filters.status|urlencode }}&amp;offerwall={{ filters.offerwall }}&amp;supplier={{ filters.supplier }}">← Previous</a>{% else %}<span></span>{% endif %}
+    {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&amp;q={{ filters.q|urlencode }}&amp;country={{ filters.country|urlencode }}&amp;provider={{ filters.provider|urlencode }}&amp;source={{ filters.source }}&amp;status={{ filters.status|urlencode }}&amp;offerwall={{ filters.offerwall }}&amp;supplier={{ filters.supplier }}">← Previous</a>{% else %}<span></span>{% endif %}
     <strong>{{ page.number }} / {{ page.paginator.num_pages }}</strong>
-    {% if page.has_next %}<a href="?page={{ page.next_page_number }}&amp;q={{ filters.q|urlencode }}&amp;country={{ filters.country|urlencode }}&amp;provider={{ filters.provider|urlencode }}&amp;status={{ filters.status|urlencode }}&amp;offerwall={{ filters.offerwall }}&amp;supplier={{ filters.supplier }}">Next →</a>{% else %}<span></span>{% endif %}
+    {% if page.has_next %}<a href="?page={{ page.next_page_number }}&amp;q={{ filters.q|urlencode }}&amp;country={{ filters.country|urlencode }}&amp;provider={{ filters.provider|urlencode }}&amp;source={{ filters.source }}&amp;status={{ filters.status|urlencode }}&amp;offerwall={{ filters.offerwall }}&amp;supplier={{ filters.supplier }}">Next →</a>{% else %}<span></span>{% endif %}
   </nav>
 </section>
+<script>
+(() => {
+  const all = document.getElementById('inventory-check-all');
+  const rows = [...document.querySelectorAll('.inventory-row-check')];
+  const count = document.getElementById('inventory-selected-count');
+  if (!all || !count) return;
+  const update = () => {
+    const checked = rows.filter((item) => item.checked).length;
+    count.textContent = checked;
+    all.checked = rows.length > 0 && checked === rows.length;
+    all.indeterminate = checked > 0 && checked < rows.length;
+  };
+  all.addEventListener('change', () => { rows.forEach((item) => { item.checked = all.checked; }); update(); });
+  rows.forEach((item) => item.addEventListener('change', update));
+  update();
+})();
+</script>
 {% endblock %}

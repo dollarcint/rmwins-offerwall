@@ -25,6 +25,7 @@ from .models import (
     OfferConversion,
     OfferConversionEvent,
     OfferOverride,
+    OfferwallInventoryRule,
     PlacementEventPostback,
     PostbackDelivery,
     Publisher,
@@ -135,22 +136,38 @@ def ensure_service_user(publisher: Publisher):
     return user
 
 
-def payout_percent_for(publisher: Publisher, override: OfferOverride | None) -> Decimal:
+def payout_percent_for(
+    publisher: Publisher,
+    override: OfferOverride | None,
+    *,
+    survey: Survey | None = None,
+) -> Decimal:
+    """Resolve supplier share using supplier override, survey cut, then supplier default."""
+
     if override and override.payout_percent_override is not None:
         return override.payout_percent_override
+    if survey is not None:
+        try:
+            rule = survey.offerwall_inventory_rule
+        except OfferwallInventoryRule.DoesNotExist:
+            rule = None
+        if rule and rule.platform_cut_percent is not None:
+            return Decimal("100.00") - rule.platform_cut_percent
     return publisher.payout_percent
 
 
 def payout_for(survey: Survey, publisher: Publisher, override: OfferOverride | None):
     if survey.cpi is None:
         return None
-    payout = (survey.cpi * payout_percent_for(publisher, override)) / Decimal("100")
+    payout = (
+        survey.cpi * payout_percent_for(publisher, override, survey=survey)
+    ) / Decimal("100")
     return payout.quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
 
 
 def eligible_surveys(publisher: Publisher, visit: WallVisit):
     queryset = (
-        Survey.objects.select_related("client", "integration")
+        Survey.objects.select_related("client", "integration", "offerwall_inventory_rule")
         .filter(status=Survey.Status.LIVE, remaining__gt=0, cpi__gt=0)
         .filter(Q(client__isnull=True) | Q(client__is_active=True))
         .filter(
@@ -370,7 +387,7 @@ def create_offer_click(*, visit: WallVisit, survey: Survey, request) -> tuple[Of
                 client_data=client_data,
                 supplier_respondent_id=visit.external_user_id,
             )
-            percent = payout_percent_for(publisher, override)
+            percent = payout_percent_for(publisher, override, survey=survey)
             click = OfferClick.objects.create(
                 visit=visit,
                 publisher=publisher,

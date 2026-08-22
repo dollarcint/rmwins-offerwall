@@ -783,6 +783,39 @@ class OfferwallFlowTests(TestCase):
                 "is_enabled": "1",
             },
         )
+        global_cut = self.client.post(
+            reverse("offerwall:admin-inventory"),
+            {
+                "action": "save-global-rule",
+                "survey_id": self.survey.pk,
+                "platform_cut_percent": "35.00",
+                "admin_note": "Standard consumer inventory margin",
+            },
+        )
+        self.assertEqual(global_cut.status_code, 302)
+        rule = OfferwallInventoryRule.objects.get(survey=self.survey)
+        self.assertEqual(rule.platform_cut_percent, Decimal("35.00"))
+        self.assertEqual(offer_catalog(self.publisher, visit)[0]["reward"], Decimal("3.25"))
+        self.client.post(
+            reverse("offerwall:admin-inventory"),
+            {
+                "action": "set-inventory-state",
+                "survey_id": self.survey.pk,
+                "is_enabled": "1",
+            },
+        )
+        rule.refresh_from_db()
+        self.assertEqual(rule.admin_note, "Standard consumer inventory margin")
+
+        inherited_click = self._click(
+            visit=self._visit(
+                user_id="global-cut-user",
+                nonce="global_cut_nonce_12345",
+            )
+        )
+        self.assertEqual(inherited_click.payout_percent_snapshot, Decimal("65.00"))
+        self.assertEqual(inherited_click.payout_snapshot, Decimal("3.25"))
+
         changed = self.client.post(
             reverse("offerwall:admin-inventory"),
             {
@@ -799,15 +832,98 @@ class OfferwallFlowTests(TestCase):
         self.assertEqual(offer["reward"], Decimal("3.00"))
         self.assertTrue(offer["featured"])
 
-        self.client.post(
+        inherited = self.client.post(
             reverse("offerwall:admin-inventory"),
             {
                 "action": "save-supplier-rule",
                 "survey_id": self.survey.pk,
                 "supplier": self.publisher.public_id,
-                "allocation": "excluded",
-                "payout_percent_override": "60.00",
+                "allocation": "assigned",
+                "payout_percent_override": "",
             },
+        )
+        self.assertEqual(inherited.status_code, 302)
+        self.assertEqual(offer_catalog(self.publisher, visit)[0]["reward"], Decimal("3.25"))
+        inventory_page = self.client.get(
+            reverse("offerwall:admin-inventory"),
+            {"supplier": self.publisher.public_id},
+        )
+        self.assertContains(inventory_page, "RM Wins survey cut")
+        self.assertContains(inventory_page, "Final supplier CPI")
+
+        second_survey = Survey.objects.create(
+            client=self.client_record,
+            source_key="manual-offer-bulk-2",
+            inventory_source=Survey.InventorySource.MANUAL,
+            company_name="Manual Buyer",
+            name="Second bulk control survey",
+            status=Survey.Status.LIVE,
+            sample_size=50,
+            remaining=50,
+            cpi=Decimal("4.00"),
+            country_code="US",
+            entry_link="https://surveys.example.test/start?rid=placeholder",
+            manual_rid_parameter="rid",
+        )
+        bulk_paused = self.client.post(
+            reverse("offerwall:admin-inventory"),
+            {
+                "action": "bulk-pause",
+                "survey_ids": [self.survey.pk, second_survey.pk],
+                "supplier": self.publisher.public_id,
+            },
+        )
+        self.assertEqual(bulk_paused.status_code, 302)
+        self.assertEqual(
+            OfferwallInventoryRule.objects.filter(
+                survey__in=[self.survey, second_survey],
+                is_enabled=False,
+            ).count(),
+            2,
+        )
+        bulk_enabled = self.client.post(
+            reverse("offerwall:admin-inventory"),
+            {
+                "action": "bulk-enable",
+                "survey_ids": [self.survey.pk, second_survey.pk],
+                "supplier": self.publisher.public_id,
+            },
+        )
+        self.assertEqual(bulk_enabled.status_code, 302)
+        bulk_cut = self.client.post(
+            reverse("offerwall:admin-inventory"),
+            {
+                "action": "bulk-set-cut",
+                "survey_ids": [self.survey.pk, second_survey.pk],
+                "bulk_platform_cut_percent": "25.00",
+                "supplier": self.publisher.public_id,
+            },
+        )
+        self.assertEqual(bulk_cut.status_code, 302)
+        self.assertEqual(
+            OfferwallInventoryRule.objects.filter(
+                survey__in=[self.survey, second_survey],
+                platform_cut_percent=Decimal("25.00"),
+            ).count(),
+            2,
+        )
+
+        bulk_excluded = self.client.post(
+            reverse("offerwall:admin-inventory"),
+            {
+                "action": "bulk-exclude",
+                "survey_ids": [self.survey.pk, second_survey.pk],
+                "supplier": self.publisher.public_id,
+            },
+        )
+        self.assertEqual(bulk_excluded.status_code, 302)
+        self.assertEqual(
+            OfferOverride.objects.filter(
+                publisher=self.publisher,
+                survey__in=[self.survey, second_survey],
+                is_excluded=True,
+            ).count(),
+            2,
         )
         self.assertEqual(offer_catalog(self.publisher, visit), [])
 
