@@ -1,0 +1,46 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}{{ statement.invoice_number|default:'Billing statement' }} · {{ portal_publisher.name }}{% endblock %}
+{% block content %}
+<section class="ow-portal-page ow-statement-page">
+  <header class="ow-statement-toolbar">
+    <a href="{% url 'offerwall:publisher-billing' %}">← Back to monthly billing</a>
+    <button type="button" onclick="window.print()">Print statement</button>
+  </header>
+
+  <article class="ow-invoice-sheet">
+    <header class="ow-invoice-head">
+      <div><span class="ow-brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><p><strong>RM Wins Insights</strong><small>Monthly supplier settlement</small></p></div>
+      <div><span>Billing statement</span><h1>{{ statement.invoice_number|default:statement.public_id }}</h1><span class="ow-status {{ statement.status }}">{{ statement.get_status_display }}</span></div>
+    </header>
+
+    <section class="ow-invoice-parties">
+      <div><span>Statement for</span><h2>{{ portal_publisher.name }}</h2><p>{{ supplier_account.business_email|default:'Business email unavailable' }}</p><p>{% if supplier_account.address_line %}{{ supplier_account.address_line }}, {% endif %}{% if supplier_account.city %}{{ supplier_account.city }}, {% endif %}{{ supplier_account.country|default:'' }}</p><small>Publisher ID #{{ portal_publisher.publisher_code }}</small></div>
+      <dl><div><dt>Billing period</dt><dd>{% if statement.billing_period_start %}{{ statement.billing_period_start|date:'d M Y' }} – {{ statement.billing_period_end|date:'d M Y' }}{% else %}Legacy statement{% endif %}</dd></div><div><dt>Generated</dt><dd>{{ statement.requested_at|date:'d M Y, H:i' }}</dd></div><div><dt>Currency</dt><dd>{{ statement.currency }}</dd></div></dl>
+    </section>
+
+    <section class="ow-invoice-amount">
+      <div><span>Description</span><strong>Verified supplier earnings eligible at calendar-month close</strong><small>Rewards under hold or manual review are not included until released.</small></div>
+      <div><span>Statement amount</span><strong>{{ statement.currency }} {{ statement.amount|floatformat:2 }}</strong></div>
+    </section>
+
+    <section class="ow-invoice-progress">
+      <h2>Settlement progress</h2>
+      <div class="ow-invoice-timeline">
+        <article class="complete"><i>1</i><div><strong>Generated</strong><span>{{ statement.requested_at|date:'d M Y, H:i' }}</span></div></article>
+        <article class="{% if statement.status != 'pending' %}complete{% endif %}"><i>2</i><div><strong>Reviewed</strong><span>{% if statement.reviewed_at %}{{ statement.reviewed_at|date:'d M Y, H:i' }}{% else %}Awaiting RM Wins review{% endif %}</span></div></article>
+        <article class="{% if statement.status == 'processing' or statement.status == 'paid' %}complete{% endif %}"><i>3</i><div><strong>Processing</strong><span>{% if statement.status == 'processing' %}Settlement in progress{% elif statement.status == 'paid' %}Processing completed{% elif statement.status == 'rejected' or statement.status == 'canceled' %}Statement closed{% else %}Starts after approval{% endif %}</span></div></article>
+        <article class="{% if statement.status == 'paid' %}complete paid{% endif %}"><i>4</i><div><strong>Paid</strong><span>{% if statement.paid_at %}{{ statement.paid_at|date:'d M Y, H:i' }}{% else %}Pending settlement{% endif %}</span></div></article>
+      </div>
+    </section>
+
+    <section class="ow-invoice-payment">
+      <div><span>Settlement method</span><strong>{{ statement.payout_method|default:'Monthly settlement' }}</strong></div>
+      <div><span>Payment reference</span><strong>{{ statement.payment_reference|default:'Pending' }}</strong></div>
+      <div><span>Balance snapshot</span><strong>{{ statement.currency }} {{ statement.available_balance_snapshot|floatformat:2 }}</strong></div>
+    </section>
+
+    {% if statement.status == 'rejected' or statement.status == 'canceled' %}<div class="ow-invoice-closed-note">This statement was {{ statement.get_status_display|lower }}. Its eligible balance is returned to a future monthly billing cycle.</div>{% endif %}
+    <footer><p>This system-generated statement records supplier earnings and settlement status. It is not a tax invoice unless separately confirmed by RM Wins Insights.</p><span>Generated securely by RM Wins Offerwall</span></footer>
+  </article>
+</section>
+{% endblock %}

@@ -2002,6 +2002,82 @@ class OfferwallFlowTests(TestCase):
         process_attempt_outcome(click.attempt_id)
         return click
 
+    def test_supplier_monthly_billing_is_filterable_exportable_and_scoped(self):
+        self._open_supplier_session(suffix="billing-page")
+        statement = PublisherPayoutRequest.objects.create(
+            publisher=self.publisher,
+            invoice_number="RMW-202607-000001",
+            billing_period_start=date(2026, 7, 1),
+            billing_period_end=date(2026, 7, 31),
+            generated_automatically=True,
+            amount=Decimal("42.75"),
+            currency="USD",
+            status=PublisherPayoutRequest.Status.PAID,
+            payout_method="Monthly settlement",
+            payment_reference="BANK-RMW-7788",
+            available_balance_snapshot=Decimal("42.75"),
+            reviewed_at=timezone.now(),
+            paid_at=timezone.now(),
+        )
+        other = Publisher.objects.create(
+            name="Private Billing Supplier",
+            slug="private-billing-supplier",
+        )
+        other_statement = PublisherPayoutRequest.objects.create(
+            publisher=other,
+            invoice_number="RMW-202607-000002",
+            billing_period_start=date(2026, 7, 1),
+            billing_period_end=date(2026, 7, 31),
+            amount=Decimal("99.00"),
+            currency="USD",
+            status=PublisherPayoutRequest.Status.PENDING,
+            payout_method="Monthly settlement",
+            available_balance_snapshot=Decimal("99.00"),
+        )
+
+        page = self.client.get(
+            reverse("offerwall:publisher-billing"),
+            {"q": "7788", "status": "paid", "year": "2026"},
+        )
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "Monthly billing")
+        self.assertContains(page, statement.invoice_number)
+        self.assertContains(page, "BANK-RMW-7788")
+        self.assertNotContains(page, other_statement.invoice_number)
+        self.assertContains(page, "No cashout request is required")
+
+        detail = self.client.get(
+            reverse(
+                "offerwall:publisher-billing-statement",
+                kwargs={"statement_id": statement.public_id},
+            )
+        )
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, "Statement amount")
+        self.assertContains(detail, "USD 42.75")
+        self.assertContains(detail, "BANK-RMW-7788")
+        self.assertContains(detail, "Print statement")
+        self.assertEqual(
+            self.client.get(
+                reverse(
+                    "offerwall:publisher-billing-statement",
+                    kwargs={"statement_id": other_statement.public_id},
+                )
+            ).status_code,
+            404,
+        )
+
+        exported = self.client.get(
+            reverse("offerwall:publisher-billing"),
+            {"status": "paid", "year": "2026", "export": "csv"},
+        )
+        self.assertEqual(exported.status_code, 200)
+        self.assertEqual(exported["Content-Type"], "text/csv; charset=utf-8")
+        payload = b"".join(exported.streaming_content).decode("utf-8")
+        self.assertIn(statement.invoice_number, payload)
+        self.assertIn("BANK-RMW-7788", payload)
+        self.assertNotIn(other_statement.invoice_number, payload)
+
     def test_monthly_billing_locks_full_balance_and_tracks_payment(self):
         self._credit_click()
         RewardLedgerEntry.objects.filter(

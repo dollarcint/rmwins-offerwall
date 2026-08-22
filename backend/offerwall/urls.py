@@ -113,6 +113,16 @@ urlpatterns = [
         name="publisher-general-details",
     ),
     path(
+        "publisher/billing/",
+        views.publisher_billing,
+        name="publisher-billing",
+    ),
+    path(
+        "publisher/billing/<uuid:statement_id>/",
+        views.publisher_billing_statement,
+        name="publisher-billing-statement",
+    ),
+    path(
         "publisher/sections/<slug:section>/",
         views.publisher_section,
         name="publisher-section",

@@ -34,10 +34,11 @@
   </div>
   <section class="ow-panel ow-payout-history">
     <header><div><span class="ow-eyebrow"><i></i> Billing history</span><h2>Monthly statements</h2></div></header>
-    <div class="ow-table-wrap"><table><thead><tr><th>Period</th><th>Invoice</th><th>Generated</th><th>Status</th><th>Amount</th><th>Reference</th></tr></thead><tbody>
-    {% for payout in payout_requests %}<tr><td>{% if payout.billing_period_start %}{{ payout.billing_period_start|date:'M Y' }}{% else %}Legacy{% endif %}</td><td class="mono">{{ payout.invoice_number|default:payout.public_id }}</td><td>{{ payout.requested_at|date:'d M Y H:i' }}</td><td><span class="ow-status {{ payout.status }}">{{ payout.get_status_display }}</span></td><td>{{ payout.currency }} {{ payout.amount|floatformat:2 }}</td><td>{{ payout.payment_reference|default:'—' }}</td></tr>
-    {% empty %}<tr><td colspan="6" class="ow-table-empty">Your first statement will appear after the month closes.</td></tr>{% endfor %}
+    <div class="ow-table-wrap"><table><thead><tr><th>Period</th><th>Invoice</th><th>Generated</th><th>Status</th><th>Amount</th><th>Reference</th><th></th></tr></thead><tbody>
+    {% for payout in payout_requests %}<tr><td>{% if payout.billing_period_start %}{{ payout.billing_period_start|date:'M Y' }}{% else %}Legacy{% endif %}</td><td class="mono">{{ payout.invoice_number|default:payout.public_id }}</td><td>{{ payout.requested_at|date:'d M Y H:i' }}</td><td><span class="ow-status {{ payout.status }}">{{ payout.get_status_display }}</span></td><td>{{ payout.currency }} {{ payout.amount|floatformat:2 }}</td><td>{{ payout.payment_reference|default:'—' }}</td><td><a href="{% url 'offerwall:publisher-billing-statement' payout.public_id %}">View</a></td></tr>
+    {% empty %}<tr><td colspan="7" class="ow-table-empty">Your first statement will appear after the month closes.</td></tr>{% endfor %}
     </tbody></table></div>
+    <footer class="ow-billing-dashboard-link"><a href="{% url 'offerwall:publisher-billing' %}">Open monthly billing →</a></footer>
   </section>
 </section>
 {% endblock %}

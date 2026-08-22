@@ -3732,6 +3732,171 @@ def placement_embed(request, placement_id):
     return _placement_embed_response(request, placement)
 
 
+def _publisher_billing_filters(request, publisher):
+    query = str(request.GET.get("q") or "").strip()[:160]
+    status = str(request.GET.get("status") or "all").strip().lower()
+    allowed_statuses = {value for value, _ in PublisherPayoutRequest.Status.choices}
+    if status != "all" and status not in allowed_statuses:
+        status = "all"
+    year = str(request.GET.get("year") or "all").strip()
+    if year != "all" and not (year.isdigit() and len(year) == 4):
+        year = "all"
+
+    statements = PublisherPayoutRequest.objects.filter(publisher=publisher)
+    if query:
+        statements = statements.filter(
+            Q(invoice_number__icontains=query)
+            | Q(payment_reference__icontains=query)
+        )
+    if status != "all":
+        statements = statements.filter(status=status)
+    if year != "all":
+        statements = statements.filter(billing_period_start__year=int(year))
+    return statements.order_by("-requested_at"), {
+        "q": query,
+        "status": status,
+        "year": year,
+    }
+
+
+@require_GET
+def publisher_billing(request):
+    publisher, denied = _publisher_portal_or_response(request)
+    if denied:
+        return denied
+    statements, filters = _publisher_billing_filters(request, publisher)
+
+    if str(request.GET.get("export") or "").strip().lower() == "csv":
+        writer = csv.writer(_CsvEcho())
+
+        def rows():
+            yield writer.writerow(
+                [
+                    "Invoice",
+                    "Period start",
+                    "Period end",
+                    "Generated",
+                    "Status",
+                    "Amount",
+                    "Currency",
+                    "Payment reference",
+                    "Reviewed",
+                    "Paid",
+                ]
+            )
+            for statement in statements.iterator(chunk_size=500):
+                values = [
+                    statement.invoice_number or statement.public_id,
+                    statement.billing_period_start or "",
+                    statement.billing_period_end or "",
+                    timezone.localtime(statement.requested_at).isoformat(),
+                    statement.get_status_display(),
+                    f"{statement.amount:.2f}",
+                    statement.currency,
+                    statement.payment_reference,
+                    timezone.localtime(statement.reviewed_at).isoformat()
+                    if statement.reviewed_at
+                    else "",
+                    timezone.localtime(statement.paid_at).isoformat()
+                    if statement.paid_at
+                    else "",
+                ]
+                yield writer.writerow([_safe_csv_cell(value) for value in values])
+
+        response = StreamingHttpResponse(
+            rows(), content_type="text/csv; charset=utf-8"
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="rmwins-billing-{timezone.localdate():%Y%m%d}.csv"'
+        )
+        return _no_store(response)
+
+    all_statements = PublisherPayoutRequest.objects.filter(publisher=publisher)
+    summary = all_statements.aggregate(
+        total=Count("id"),
+        open_count=Count(
+            "id",
+            filter=Q(
+                status__in=[
+                    PublisherPayoutRequest.Status.PENDING,
+                    PublisherPayoutRequest.Status.APPROVED,
+                    PublisherPayoutRequest.Status.PROCESSING,
+                ]
+            ),
+        ),
+        paid_count=Count(
+            "id", filter=Q(status=PublisherPayoutRequest.Status.PAID)
+        ),
+        open_value=Coalesce(
+            Sum(
+                "amount",
+                filter=Q(
+                    status__in=[
+                        PublisherPayoutRequest.Status.PENDING,
+                        PublisherPayoutRequest.Status.APPROVED,
+                        PublisherPayoutRequest.Status.PROCESSING,
+                    ]
+                ),
+            ),
+            Value(Decimal("0.00")),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        ),
+        paid_value=Coalesce(
+            Sum("amount", filter=Q(status=PublisherPayoutRequest.Status.PAID)),
+            Value(Decimal("0.00")),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        ),
+    )
+    years = sorted(
+        {
+            value.year
+            for value in all_statements.values_list(
+                "billing_period_start", flat=True
+            )
+            if value
+        },
+        reverse=True,
+    )
+    context = _supplier_portal_context(publisher, "billing")
+    context.update(
+        {
+            "wallet": wallet_summary(publisher),
+            "billing_summary": summary,
+            "billing_page": Paginator(statements, 25).get_page(
+                request.GET.get("page")
+            ),
+            "billing_filters": filters,
+            "billing_years": years,
+            "billing_status_choices": PublisherPayoutRequest.Status.choices,
+        }
+    )
+    return _no_store(render(request, "offerwall/publisher_billing.html", context))
+
+
+@require_GET
+def publisher_billing_statement(request, statement_id):
+    publisher, denied = _publisher_portal_or_response(request)
+    if denied:
+        return denied
+    statement = get_object_or_404(
+        PublisherPayoutRequest,
+        public_id=statement_id,
+        publisher=publisher,
+    )
+    context = _supplier_portal_context(publisher, "billing")
+    context.update(
+        {
+            "statement": statement,
+            "supplier_account": PublisherPortalAccount.objects.filter(
+                publisher=publisher
+            ).first(),
+        }
+    )
+    return _no_store(
+        render(request, "offerwall/publisher_billing_statement.html", context)
+    )
+
+
 @require_GET
 def publisher_dashboard(request):
     publisher, denied = _publisher_portal_or_response(request)

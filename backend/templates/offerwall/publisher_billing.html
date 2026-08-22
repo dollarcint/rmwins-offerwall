@@ -1,0 +1,45 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}Monthly billing · {{ portal_publisher.name }}{% endblock %}
+{% block content %}
+<section class="ow-portal-page ow-billing-page">
+  <header class="ow-page-heading ow-billing-heading">
+    <div><span class="ow-eyebrow"><i></i> Finance workspace</span><h1>Monthly billing</h1><p>Review automatically generated statements, settlement progress and payment references.</p></div>
+    <a class="ow-billing-export" href="?q={{ billing_filters.q|urlencode }}&amp;status={{ billing_filters.status }}&amp;year={{ billing_filters.year }}&amp;export=csv">Export CSV</a>
+  </header>
+
+  <section class="ow-billing-summary">
+    <article class="primary"><span>Unbilled balance</span><strong>{{ wallet.currency }} {{ wallet.available|floatformat:2 }}</strong><small>Moves into the next eligible statement</small></article>
+    <article><span>Open statements</span><strong>{{ billing_summary.open_count }}</strong><small>{{ wallet.currency }} {{ billing_summary.open_value|floatformat:2 }} under settlement</small></article>
+    <article><span>Paid statements</span><strong>{{ billing_summary.paid_count }}</strong><small>{{ wallet.currency }} {{ billing_summary.paid_value|floatformat:2 }} settled</small></article>
+    <article><span>Next cycle</span><strong>{{ wallet.next_billing_date|date:'d M Y' }}</strong><small>Automatic calendar-month close</small></article>
+  </section>
+
+  <section class="ow-billing-cycle-note">
+    <div><span>Automatic settlement</span><strong>No cashout request is required.</strong></div>
+    <p>Available rewards are locked after the calendar month closes. Rewards still under hold or review automatically remain for a later eligible cycle.</p>
+  </section>
+
+  <section class="ow-panel ow-billing-ledger">
+    <header><div><span class="ow-eyebrow"><i></i> Statement ledger</span><h2>Billing history</h2></div><small>{{ billing_page.paginator.count }} statement{{ billing_page.paginator.count|pluralize }}</small></header>
+    <form method="get" class="ow-billing-filters">
+      <label class="search"><span>Search</span><input type="search" name="q" value="{{ billing_filters.q }}" placeholder="Invoice or payment reference"></label>
+      <label><span>Status</span><select name="status"><option value="all">All statuses</option>{% for value, label in billing_status_choices %}<option value="{{ value }}" {% if billing_filters.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      <label><span>Billing year</span><select name="year"><option value="all">All years</option>{% for year in billing_years %}<option value="{{ year }}" {% if billing_filters.year == year|stringformat:'s' %}selected{% endif %}>{{ year }}</option>{% endfor %}</select></label>
+      <div><button type="submit">Apply filters</button><a href="{% url 'offerwall:publisher-billing' %}">Reset</a></div>
+    </form>
+    <div class="ow-table-wrap"><table class="ow-billing-table"><thead><tr><th>Invoice</th><th>Period</th><th>Generated</th><th>Status</th><th>Amount</th><th>Payment reference</th><th>Last update</th><th></th></tr></thead><tbody>
+      {% for statement in billing_page.object_list %}<tr>
+        <td><strong class="mono">{{ statement.invoice_number|default:statement.public_id }}</strong><small>{% if statement.generated_automatically %}System generated{% else %}Legacy statement{% endif %}</small></td>
+        <td><strong>{% if statement.billing_period_start %}{{ statement.billing_period_start|date:'M Y' }}{% else %}Legacy{% endif %}</strong><small>{% if statement.billing_period_start %}{{ statement.billing_period_start|date:'d M' }} – {{ statement.billing_period_end|date:'d M Y' }}{% else %}Period unavailable{% endif %}</small></td>
+        <td><span>{{ statement.requested_at|date:'d M Y' }}</span><small>{{ statement.requested_at|date:'H:i' }}</small></td>
+        <td><span class="ow-status {{ statement.status }}">{{ statement.get_status_display }}</span></td>
+        <td><strong>{{ statement.currency }} {{ statement.amount|floatformat:2 }}</strong><small>Balance snapshot {{ statement.available_balance_snapshot|floatformat:2 }}</small></td>
+        <td>{% if statement.payment_reference %}<code>{{ statement.payment_reference }}</code>{% else %}<span>—</span><small>Added after settlement</small>{% endif %}</td>
+        <td><span>{{ statement.updated_at|date:'d M Y' }}</span><small>{{ statement.updated_at|date:'H:i' }}</small></td>
+        <td><a class="ow-billing-view" href="{% url 'offerwall:publisher-billing-statement' statement.public_id %}">View statement</a></td>
+      </tr>{% empty %}<tr><td colspan="8" class="ow-table-empty">No monthly statements match these filters.</td></tr>{% endfor %}
+    </tbody></table></div>
+    {% if billing_page.paginator.num_pages > 1 %}<nav class="ow-pagination" aria-label="Billing pages">{% if billing_page.has_previous %}<a href="?page={{ billing_page.previous_page_number }}&amp;q={{ billing_filters.q|urlencode }}&amp;status={{ billing_filters.status }}&amp;year={{ billing_filters.year }}">Previous</a>{% endif %}<span>Page {{ billing_page.number }} of {{ billing_page.paginator.num_pages }}</span>{% if billing_page.has_next %}<a href="?page={{ billing_page.next_page_number }}&amp;q={{ billing_filters.q|urlencode }}&amp;status={{ billing_filters.status }}&amp;year={{ billing_filters.year }}">Next</a>{% endif %}</nav>{% endif %}
+  </section>
+</section>
+{% endblock %}
