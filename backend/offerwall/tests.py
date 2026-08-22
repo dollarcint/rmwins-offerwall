@@ -16,6 +16,8 @@ from vendors.models import Client
 
 from .models import (
     OfferClick,
+    OfferConversion,
+    OfferConversionEvent,
     OfferOverride,
     OfferwallAdminPortalAccount,
     PlacementEventPostback,
@@ -38,10 +40,13 @@ from .security import (
     sign_session,
 )
 from .services import (
+    approve_conversion,
     create_offer_click,
     create_wall_visit,
     offer_catalog,
     process_attempt_outcome,
+    reject_conversion,
+    release_due_conversions,
     session_url,
 )
 from .tasks import _validated_callback_url, deliver_postback_task
@@ -76,6 +81,7 @@ class OfferwallFlowTests(TestCase):
             name="Acme Rewards",
             slug="acme-rewards",
             payout_percent=Decimal("70.00"),
+            reward_hold_hours=0,
         )
         self.api_key = self.publisher._generated_api_key
         self.client_record = Client.objects.create(
@@ -352,6 +358,149 @@ class OfferwallFlowTests(TestCase):
         delivery = PostbackDelivery.objects.get(click=click, event_type="reversal")
         self.assertEqual(reversal.amount, Decimal("3.50"))
         self.assertEqual(delivery.payload["amount"], "-3.50")
+
+    def test_reward_hold_keeps_balance_pending_until_scheduler_release(self):
+        self.publisher.reward_hold_hours = 24
+        self.publisher.save(update_fields=["reward_hold_hours", "updated_at"])
+        click = self._click()
+        click.attempt.status = SurveyAttempt.Status.COMPLETED
+        click.attempt.status_source = "innovatemr_s2s"
+        click.attempt.is_verified = True
+        click.attempt.save(
+            update_fields=["status", "status_source", "is_verified", "updated_at"]
+        )
+        process_attempt_outcome(click.attempt_id)
+
+        conversion = OfferConversion.objects.get(click=click)
+        credit = RewardLedgerEntry.objects.get(
+            click=click, entry_type=RewardLedgerEntry.EntryType.CREDIT
+        )
+        self.assertEqual(conversion.status, OfferConversion.Status.PENDING)
+        self.assertEqual(credit.status, RewardLedgerEntry.Status.PENDING)
+        self.assertFalse(PostbackDelivery.objects.filter(click=click).exists())
+        pending_wallet = wallet_summary(self.publisher)
+        self.assertEqual(pending_wallet["pending"], Decimal("3.50"))
+        self.assertEqual(pending_wallet["available"], Decimal("0.00"))
+
+        conversion.hold_until = timezone.now() - timedelta(seconds=1)
+        conversion.save(update_fields=["hold_until", "updated_at"])
+        self.assertEqual(release_due_conversions(), 1)
+        self.assertEqual(release_due_conversions(), 0)
+
+        conversion.refresh_from_db()
+        credit.refresh_from_db()
+        click.refresh_from_db()
+        self.assertEqual(conversion.status, OfferConversion.Status.APPROVED)
+        self.assertEqual(credit.status, RewardLedgerEntry.Status.AVAILABLE)
+        self.assertIsNotNone(credit.released_at)
+        self.assertIsNotNone(click.credited_at)
+        self.assertTrue(
+            PostbackDelivery.objects.filter(click=click, event_type="complete").exists()
+        )
+        released_wallet = wallet_summary(self.publisher)
+        self.assertEqual(released_wallet["pending"], Decimal("0.00"))
+        self.assertEqual(released_wallet["available"], Decimal("3.50"))
+
+    def test_manual_rejection_voids_pending_reward_with_audit_events(self):
+        self.publisher.reward_hold_hours = 24
+        self.publisher.risk_review_threshold = 10
+        self.publisher.save(
+            update_fields=[
+                "reward_hold_hours",
+                "risk_review_threshold",
+                "updated_at",
+            ]
+        )
+        click = self._click()
+        click.attempt.status = SurveyAttempt.Status.COMPLETED
+        click.attempt.status_source = "innovatemr_s2s"
+        click.attempt.is_verified = True
+        click.attempt.save(
+            update_fields=["status", "status_source", "is_verified", "updated_at"]
+        )
+        process_attempt_outcome(click.attempt_id)
+        conversion = OfferConversion.objects.get(click=click)
+        self.assertTrue(conversion.requires_manual_review)
+        self.assertGreaterEqual(conversion.risk_score, 10)
+
+        reject_conversion(conversion.pk, reason="Velocity review failed")
+        conversion.refresh_from_db()
+        credit = RewardLedgerEntry.objects.get(
+            click=click, entry_type=RewardLedgerEntry.EntryType.CREDIT
+        )
+        self.assertEqual(conversion.status, OfferConversion.Status.REJECTED)
+        self.assertEqual(credit.status, RewardLedgerEntry.Status.VOIDED)
+        self.assertTrue(
+            RewardLedgerEntry.objects.filter(
+                click=click, entry_type=RewardLedgerEntry.EntryType.REVERSAL
+            ).exists()
+        )
+        self.assertEqual(wallet_summary(self.publisher)["available"], Decimal("0.00"))
+        self.assertEqual(
+            list(conversion.events.values_list("event_type", flat=True)),
+            [OfferConversionEvent.EventType.CREATED, OfferConversionEvent.EventType.REJECTED],
+        )
+        with self.assertRaisesMessage(ValueError, "rejected"):
+            approve_conversion(conversion.pk)
+        process_attempt_outcome(click.attempt_id)
+        self.assertEqual(
+            RewardLedgerEntry.objects.filter(click=click).count(),
+            2,
+        )
+
+    def test_admin_conversion_queue_can_release_manual_review(self):
+        self.publisher.reward_hold_hours = 24
+        self.publisher.risk_review_threshold = 0
+        self.publisher.save(
+            update_fields=[
+                "reward_hold_hours",
+                "risk_review_threshold",
+                "updated_at",
+            ]
+        )
+        click = self._click()
+        click.attempt.status = SurveyAttempt.Status.COMPLETED
+        click.attempt.status_source = "innovatemr_s2s"
+        click.attempt.is_verified = True
+        click.attempt.save(
+            update_fields=["status", "status_source", "is_verified", "updated_at"]
+        )
+        process_attempt_outcome(click.attempt_id)
+        conversion = OfferConversion.objects.get(click=click)
+        admin_user = get_user_model().objects.create_user(
+            username="conversion-admin",
+            password="Conversion-Admin-9472",
+            is_staff=True,
+        )
+        OfferwallAdminPortalAccount.objects.create(
+            user=admin_user, must_change_password=False
+        )
+        self.client.post(
+            reverse("offerwall:admin-login"),
+            {"username": admin_user.username, "password": "Conversion-Admin-9472"},
+        )
+        queue = self.client.get(reverse("offerwall:admin-conversions"))
+        self.assertEqual(queue.status_code, 200)
+        self.assertContains(queue, conversion.source_transaction_id)
+        self.assertContains(queue, "Manual review")
+
+        response = self.client.post(
+            reverse("offerwall:admin-conversions"),
+            {
+                "conversion_id": conversion.public_id,
+                "action": "approve",
+                "reason": "Reviewed against provider record",
+            },
+        )
+        self.assertRedirects(
+            response,
+            reverse("offerwall:admin-conversions"),
+            fetch_redirect_response=False,
+        )
+        conversion.refresh_from_db()
+        self.assertEqual(conversion.status, OfferConversion.Status.APPROVED)
+        self.assertEqual(conversion.decided_by, admin_user)
+        self.assertEqual(wallet_summary(self.publisher)["available"], Decimal("3.50"))
 
     def test_result_page_requires_signature(self):
         click = self._click()
@@ -1407,7 +1556,8 @@ class OfferwallFlowTests(TestCase):
             reverse("offerwall:publisher-section", kwargs={"section": "reports"})
         )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Reports is ready in navigation")
+        self.assertContains(response, "Conversion reports")
+        self.assertContains(response, "Financial conversion ledger")
         self.assertContains(response, "Placements")
 
     def test_supplier_survey_results_are_filterable_and_show_clean_outcomes(self):

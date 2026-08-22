@@ -114,6 +114,9 @@ OFFERWALL_PORTAL_SESSION_TTL_SECONDS = max(
 OFFERWALL_MINIMUM_PAYOUT = max(
     Decimal("0.01"), Decimal(os.getenv("OFFERWALL_MINIMUM_PAYOUT", "50.00"))
 )
+OFFERWALL_REWARD_RELEASE_INTERVAL_SECONDS = max(
+    15, int(os.getenv("OFFERWALL_REWARD_RELEASE_INTERVAL_SECONDS", "60"))
+)
 OFFERWALL_VERIFICATION_TTL_SECONDS = max(
     300, int(os.getenv("OFFERWALL_VERIFICATION_TTL_SECONDS", "900"))
 )
@@ -558,5 +561,9 @@ CELERY_BEAT_SCHEDULE = {
     "reconcile-legacy-redirect-attempts": {
         "task": "surveys.reconcile_pending_attempts",
         "schedule": float(INNOVATEMR_ATTEMPT_RECONCILE_INTERVAL_SECONDS),
+    },
+    "release-offerwall-rewards": {
+        "task": "offerwall.release_due_rewards",
+        "schedule": float(OFFERWALL_REWARD_RELEASE_INTERVAL_SECONDS),
     },
 } if ENABLE_SCHEDULED_JOBS else {}

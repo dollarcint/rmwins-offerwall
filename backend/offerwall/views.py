@@ -66,6 +66,7 @@ from .forms import (
 )
 from .models import (
     OfferClick,
+    OfferConversion,
     OfferwallAdminPortalAccount,
     PlacementEventPostback,
     PostbackDelivery,
@@ -96,9 +97,11 @@ from .services import (
     create_api_visit,
     create_offer_click,
     create_wall_visit,
+    approve_conversion,
     offer_catalog,
     process_attempt_outcome,
     review_publisher_registration,
+    reject_conversion,
     result_url,
     session_url,
 )
@@ -777,19 +780,41 @@ def admin_portal_suppliers(request):
     if request.method == "POST":
         publisher_id = str(request.POST.get("publisher_id") or "").strip()
         raw_payout = str(request.POST.get("payout_percent") or "").strip()
+        raw_hold = str(request.POST.get("reward_hold_hours") or "").strip()
+        raw_threshold = str(request.POST.get("risk_review_threshold") or "").strip()
         try:
+            publisher = Publisher.objects.get(public_id=publisher_id)
             payout_percent = Decimal(raw_payout).quantize(Decimal("0.01"))
             if payout_percent < 0 or payout_percent > 100:
                 raise ValueError
-            publisher = Publisher.objects.get(public_id=publisher_id)
+            reward_hold_hours = int(raw_hold or publisher.reward_hold_hours)
+            risk_review_threshold = int(
+                raw_threshold or publisher.risk_review_threshold
+            )
+            if not 0 <= reward_hold_hours <= 720:
+                raise ValueError
+            if not 0 <= risk_review_threshold <= 100:
+                raise ValueError
         except (ArithmeticError, ValidationError, ValueError, Publisher.DoesNotExist):
-            messages.error(request, "Enter a valid supplier payout between 0 and 100%.")
+            messages.error(
+                request,
+                "Enter a valid payout (0–100%), hold (0–720 hours) and risk threshold (0–100).",
+            )
         else:
             publisher.payout_percent = payout_percent
-            publisher.save(update_fields=["payout_percent", "updated_at"])
+            publisher.reward_hold_hours = reward_hold_hours
+            publisher.risk_review_threshold = risk_review_threshold
+            publisher.save(
+                update_fields=[
+                    "payout_percent",
+                    "reward_hold_hours",
+                    "risk_review_threshold",
+                    "updated_at",
+                ]
+            )
             messages.success(
                 request,
-                f"{publisher.name} payout updated to {payout_percent:.2f}%.",
+                f"{publisher.name} commercial and risk controls were updated.",
             )
         return _no_store(HttpResponseRedirect(reverse("offerwall:admin-suppliers")))
 
@@ -834,6 +859,130 @@ def admin_portal_suppliers(request):
         }
     )
     return _no_store(render(request, "offerwall/admin_suppliers.html", context))
+
+
+@require_http_methods(["GET", "POST"])
+def admin_portal_conversions(request):
+    account, denied = _admin_portal_or_response(request)
+    if denied:
+        return denied
+    if request.method == "POST":
+        conversion_id = str(request.POST.get("conversion_id") or "").strip()
+        action = str(request.POST.get("action") or "").strip().lower()
+        reason = str(request.POST.get("reason") or "").strip()[:500]
+        try:
+            conversion = OfferConversion.objects.get(public_id=conversion_id)
+            if action == "approve":
+                approve_conversion(
+                    conversion.pk,
+                    reviewer=account.user,
+                    reason=reason or "Approved by an RM Wins administrator",
+                )
+                messages.success(request, "Conversion approved and supplier reward released.")
+            elif action == "reject":
+                if not reason:
+                    raise ValidationError("Enter a rejection reason for the audit trail.")
+                reject_conversion(
+                    conversion.pk,
+                    reviewer=account.user,
+                    reason=reason,
+                )
+                messages.success(request, "Conversion rejected and reward voided.")
+            else:
+                raise ValidationError("Unknown conversion action.")
+        except OfferConversion.DoesNotExist:
+            messages.error(request, "Conversion could not be found.")
+        except (ValidationError, ValueError) as exc:
+            message = " ".join(exc.messages) if isinstance(exc, ValidationError) else str(exc)
+            messages.error(request, message)
+        destination = reverse("offerwall:admin-conversions")
+        return _no_store(HttpResponseRedirect(destination))
+
+    conversions = OfferConversion.objects.select_related(
+        "publisher", "placement", "survey", "click", "decided_by"
+    )
+    query = str(request.GET.get("q") or "").strip()[:160]
+    status = str(request.GET.get("status") or "pending").strip().lower()
+    publisher_id = str(request.GET.get("publisher") or "").strip()
+    review = str(request.GET.get("review") or "all").strip().lower()
+    allowed_statuses = {value for value, _ in OfferConversion.Status.choices}
+    if status != "all" and status in allowed_statuses:
+        conversions = conversions.filter(status=status)
+    elif status != "all":
+        status = "pending"
+        conversions = conversions.filter(status=status)
+    if publisher_id:
+        conversions = conversions.filter(publisher__public_id=publisher_id)
+    if review == "manual":
+        conversions = conversions.filter(requires_manual_review=True)
+    elif review == "automatic":
+        conversions = conversions.filter(requires_manual_review=False)
+    else:
+        review = "all"
+    if query:
+        conversions = conversions.filter(
+            Q(source_transaction_id__icontains=query)
+            | Q(source_reference_id__icontains=query)
+            | Q(external_user_id__icontains=query)
+            | Q(survey__local_id__icontains=query)
+            | Q(publisher__name__icontains=query)
+        )
+
+    all_conversions = OfferConversion.objects.all()
+    pending_currency_rows = list(
+        all_conversions.filter(status=OfferConversion.Status.PENDING)
+        .values("currency")
+        .annotate(value=Sum("supplier_amount"), total=Count("id"))
+        .order_by("currency")
+    )
+    stats = all_conversions.aggregate(
+        total=Count("id"),
+        pending=Count("id", filter=Q(status=OfferConversion.Status.PENDING)),
+        manual=Count(
+            "id",
+            filter=Q(
+                status=OfferConversion.Status.PENDING,
+                requires_manual_review=True,
+            ),
+        ),
+        approved=Count("id", filter=Q(status=OfferConversion.Status.APPROVED)),
+        rejected=Count(
+            "id",
+            filter=Q(
+                status__in=[
+                    OfferConversion.Status.REJECTED,
+                    OfferConversion.Status.REVERSED,
+                ]
+            ),
+        ),
+        pending_value=Coalesce(
+            Sum(
+                "supplier_amount",
+                filter=Q(status=OfferConversion.Status.PENDING),
+            ),
+            Value(Decimal("0.00")),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        ),
+    )
+    context = _admin_base_context(account, "conversions")
+    context.update(
+        {
+            "page": Paginator(conversions.order_by("-created_at"), 30).get_page(
+                request.GET.get("page")
+            ),
+            "conversion_stats": stats,
+            "pending_currency_rows": pending_currency_rows,
+            "filters": {
+                "q": query,
+                "status": status,
+                "publisher": publisher_id,
+                "review": review,
+            },
+            "status_choices": OfferConversion.Status.choices,
+            "publishers": Publisher.objects.order_by("name"),
+        }
+    )
+    return _no_store(render(request, "offerwall/admin_conversions.html", context))
 
 
 @require_GET
@@ -1352,9 +1501,18 @@ def result(request, click_id):
     title = "Result pending"
     message = "The provider result is still being verified. No reward has been credited yet."
     if click.status == SurveyAttempt.Status.COMPLETED and credit:
-        state = "success"
-        title = "Offer completed"
-        message = "The verified completion was credited successfully."
+        if credit.status == RewardLedgerEntry.Status.AVAILABLE:
+            state = "success"
+            title = "Offer completed"
+            message = "The verified completion was credited successfully."
+        elif credit.status == RewardLedgerEntry.Status.PENDING:
+            state = "pending"
+            title = "Reward under review"
+            message = "Your completion is verified. The reward will become available after the review hold."
+        else:
+            state = "no-credit"
+            title = "Reward not approved"
+            message = "This completion did not pass the final reward review."
     elif click.status == SurveyAttempt.Status.COMPLETED:
         title = "Completion awaiting verification"
         message = "The completion has not produced a new verified credit yet."
@@ -1366,9 +1524,13 @@ def result(request, click_id):
         state = "no-credit"
         title = click.attempt.get_status_display()
         message = "This attempt did not qualify for a reward. You can choose another offer."
-    display_credit_amount = credit.amount if credit else None
+    display_credit_amount = (
+        credit.amount
+        if credit and credit.status != RewardLedgerEntry.Status.VOIDED
+        else None
+    )
     display_credit_currency = credit.currency if credit else ""
-    if credit and click.visit.placement_id:
+    if display_credit_amount is not None and click.visit.placement_id:
         display_credit_amount = click.visit.placement.display_reward(credit.amount)
         display_credit_currency = click.visit.placement.currency_name
     response = render(
@@ -2092,7 +2254,7 @@ SUPPLIER_SECTION_COPY = {
     ),
     "reports": (
         "Reports",
-        "Downloadable traffic, conversion and earnings reports are coming next.",
+        "Downloadable conversion and earnings reports.",
     ),
 }
 
@@ -2175,6 +2337,7 @@ def _survey_result_queryset(queryset):
             "attempt",
             "visit",
             "visit__placement",
+            "conversion",
         )
         .prefetch_related(
             Prefetch(
@@ -2216,7 +2379,18 @@ def _survey_result_queryset(queryset):
 def _decorate_survey_result(click):
     click.report_outcome = provider_outcome(click.attempt)
     click.report_postback = click.report_postbacks[0] if click.report_postbacks else None
-    click.report_reward = click.report_credit - click.report_reversal
+    click.report_conversion = getattr(click, "conversion", None)
+    if click.report_conversion:
+        click.report_reward = (
+            click.report_conversion.supplier_amount
+            if click.report_conversion.status
+            in {OfferConversion.Status.PENDING, OfferConversion.Status.APPROVED}
+            else Decimal("0.00")
+        )
+        click.report_reward_status = click.report_conversion.status
+    else:
+        click.report_reward = click.report_credit - click.report_reversal
+        click.report_reward_status = "available" if click.report_credit else "none"
     click.report_transaction_id = (
         str(click.report_ledger_entries[0].public_id)
         if click.report_ledger_entries
@@ -2250,6 +2424,7 @@ def _survey_results_csv(queryset, publisher, filters):
                 "Status",
                 "Verified",
                 "Reward",
+                "Reward status",
                 "Currency",
                 "Term reason",
                 "Term category",
@@ -2275,6 +2450,7 @@ def _survey_results_csv(queryset, publisher, filters):
                 click.attempt.get_status_display(),
                 "Yes" if click.is_verified else "No",
                 f"{click.report_reward:.2f}",
+                click.report_reward_status,
                 publisher.currency,
                 click.report_outcome.get("reason", ""),
                 click.report_outcome.get("category", ""),
@@ -2324,19 +2500,15 @@ def _publisher_survey_results_response(request, publisher):
         credits=Coalesce(
             Sum(
                 "amount",
-                filter=Q(entry_type=RewardLedgerEntry.EntryType.CREDIT),
-            ),
-            Value(Decimal("0.00")),
-        ),
-        reversals=Coalesce(
-            Sum(
-                "amount",
-                filter=Q(entry_type=RewardLedgerEntry.EntryType.REVERSAL),
+                filter=Q(
+                    entry_type=RewardLedgerEntry.EntryType.CREDIT,
+                    status=RewardLedgerEntry.Status.AVAILABLE,
+                ),
             ),
             Value(Decimal("0.00")),
         ),
     )
-    summary["earnings"] = ledger["credits"] - ledger["reversals"]
+    summary["earnings"] = ledger["credits"]
     summary["conversion_rate"] = (
         (summary["completed"] / summary["total"] * 100) if summary["total"] else 0
     )
@@ -2416,6 +2588,144 @@ def _publisher_respondents_response(request, publisher):
     return _no_store(render(request, "offerwall/publisher_respondents.html", context))
 
 
+def _publisher_reports_response(request, publisher):
+    today = timezone.localdate()
+    end_date = parse_date(str(request.GET.get("end") or "")) or today
+    start_date = (
+        parse_date(str(request.GET.get("start") or ""))
+        or end_date - timedelta(days=29)
+    )
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+    start_at = datetime.combine(start_date, time.min)
+    end_at = datetime.combine(end_date + timedelta(days=1), time.min)
+    if settings.USE_TZ:
+        current_zone = timezone.get_current_timezone()
+        start_at = timezone.make_aware(start_at, current_zone)
+        end_at = timezone.make_aware(end_at, current_zone)
+
+    status = str(request.GET.get("status") or "all").strip().lower()
+    allowed_statuses = {value for value, _ in OfferConversion.Status.choices}
+    if status != "all" and status not in allowed_statuses:
+        status = "all"
+    placement_id = str(request.GET.get("placement") or "all").strip()
+    query = str(request.GET.get("q") or "").strip()[:160]
+    conversions = OfferConversion.objects.filter(
+        publisher=publisher,
+        created_at__gte=start_at,
+        created_at__lt=end_at,
+    ).select_related("survey", "placement", "click")
+    if status != "all":
+        conversions = conversions.filter(status=status)
+    if placement_id != "all":
+        try:
+            placement_uuid = uuid.UUID(placement_id)
+        except (TypeError, ValueError):
+            placement_id = "all"
+        else:
+            conversions = conversions.filter(placement__public_id=placement_uuid)
+    if query:
+        conversions = conversions.filter(
+            Q(source_transaction_id__icontains=query)
+            | Q(external_user_id__icontains=query)
+            | Q(survey__local_id__icontains=query)
+            | Q(survey__name__icontains=query)
+        )
+    conversions = conversions.order_by("-created_at")
+    filters = {
+        "q": query,
+        "status": status,
+        "placement": placement_id,
+        "start": start_date.isoformat(),
+        "end": end_date.isoformat(),
+    }
+
+    if str(request.GET.get("export") or "").strip().lower() == "csv":
+        writer = csv.writer(_CsvEcho())
+
+        def rows():
+            yield writer.writerow(
+                [
+                    "Created",
+                    "Transaction ID",
+                    "Respondent ID",
+                    "Placement",
+                    "Survey ID",
+                    "Survey",
+                    "Status",
+                    "Supplier amount",
+                    "Currency",
+                    "Risk score",
+                    "Manual review",
+                    "Hold until",
+                    "Decision reason",
+                ]
+            )
+            for conversion in conversions.iterator(chunk_size=500):
+                values = [
+                    timezone.localtime(conversion.created_at).isoformat(),
+                    conversion.source_transaction_id,
+                    conversion.external_user_id,
+                    conversion.placement.name if conversion.placement else "Direct wall",
+                    conversion.survey.local_id,
+                    conversion.survey.name or f"Survey {conversion.survey.local_id}",
+                    conversion.get_status_display(),
+                    f"{conversion.supplier_amount:.2f}",
+                    conversion.currency,
+                    conversion.risk_score,
+                    "Yes" if conversion.requires_manual_review else "No",
+                    timezone.localtime(conversion.hold_until).isoformat()
+                    if conversion.hold_until
+                    else "",
+                    conversion.decision_reason,
+                ]
+                yield writer.writerow([_safe_csv_cell(value) for value in values])
+
+        filename = f"rmwins-conversions-{filters['start']}-to-{filters['end']}.csv"
+        response = StreamingHttpResponse(rows(), content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return _no_store(response)
+
+    summary = conversions.aggregate(
+        total=Count("id"),
+        pending=Count("id", filter=Q(status=OfferConversion.Status.PENDING)),
+        approved=Count("id", filter=Q(status=OfferConversion.Status.APPROVED)),
+        rejected=Count("id", filter=Q(status=OfferConversion.Status.REJECTED)),
+        reversed=Count("id", filter=Q(status=OfferConversion.Status.REVERSED)),
+        pending_value=Coalesce(
+            Sum(
+                "supplier_amount",
+                filter=Q(status=OfferConversion.Status.PENDING),
+            ),
+            Value(Decimal("0.00")),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        ),
+        approved_value=Coalesce(
+            Sum(
+                "supplier_amount",
+                filter=Q(status=OfferConversion.Status.APPROVED),
+            ),
+            Value(Decimal("0.00")),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        ),
+    )
+    decided = summary["approved"] + summary["rejected"] + summary["reversed"]
+    summary["approval_rate"] = _admin_percentage(summary["approved"], decided)
+    page = Paginator(conversions, 40).get_page(request.GET.get("page"))
+    context = _supplier_portal_context(publisher, "reports")
+    context.update(
+        {
+            "report_page": page,
+            "report_summary": summary,
+            "report_filters": filters,
+            "report_query": urlencode(filters),
+            "report_placements": publisher.placements.order_by("website_name", "name"),
+            "report_status_choices": OfferConversion.Status.choices,
+        }
+    )
+    return _no_store(render(request, "offerwall/publisher_reports.html", context))
+
+
 @require_GET
 def publisher_section(request, section):
     if section not in SUPPLIER_SECTION_COPY:
@@ -2427,6 +2737,8 @@ def publisher_section(request, section):
         return _publisher_respondents_response(request, publisher)
     if section == "survey-results":
         return _publisher_survey_results_response(request, publisher)
+    if section == "reports":
+        return _publisher_reports_response(request, publisher)
     title, description = SUPPLIER_SECTION_COPY[section]
     context = _supplier_portal_context(publisher, section)
     context.update({"section_title": title, "section_description": description})

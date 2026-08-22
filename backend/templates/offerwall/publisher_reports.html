@@ -1,0 +1,45 @@
+{% extends 'offerwall/base.html' %}
+{% block title %}Conversion reports · {{ portal_publisher.name }}{% endblock %}
+{% block content %}
+<section class="ow-portal-page ow-conversion-reports-page">
+  <header class="ow-page-heading ow-results-heading">
+    <div><span class="ow-eyebrow"><i></i> Financial reporting</span><h1>Conversion reports</h1><p>Reconcile every pending, released, rejected and reversed reward from one audit-ready report.</p></div>
+    <div class="ow-results-heading-actions"><small>Amounts use the original click snapshot</small><a href="?{{ report_query }}&amp;export=csv">Export CSV</a></div>
+  </header>
+
+  <div class="ow-result-stats ow-conversion-report-stats">
+    <article><span>Conversions</span><strong>{{ report_summary.total }}</strong><small>Selected period</small></article>
+    <article class="warning"><span>Pending rewards</span><strong>{{ portal_publisher.currency }} {{ report_summary.pending_value|floatformat:2 }}</strong><small>{{ report_summary.pending }} awaiting release</small></article>
+    <article class="success"><span>Available rewards</span><strong>{{ portal_publisher.currency }} {{ report_summary.approved_value|floatformat:2 }}</strong><small>{{ report_summary.approved }} approved</small></article>
+    <article class="danger"><span>Rejected</span><strong>{{ report_summary.rejected }}</strong><small>Never released</small></article>
+    <article class="quality"><span>Reversed</span><strong>{{ report_summary.reversed }}</strong><small>Provider adjustments</small></article>
+    <article class="earnings"><span>Approval rate</span><strong>{{ report_summary.approval_rate|floatformat:2 }}%</strong><small>Decided conversions</small></article>
+  </div>
+
+  <section class="ow-results-panel">
+    <header><div><h2>Financial conversion ledger</h2><p>Search by transaction, respondent or RM Wins survey ID.</p></div></header>
+    <form method="get" class="ow-result-filters">
+      <label class="search"><span>Search</span><input type="search" name="q" value="{{ report_filters.q }}" placeholder="Transaction, respondent or survey"></label>
+      <label><span>Placement</span><select name="placement"><option value="all">All placements</option>{% for placement in report_placements %}<option value="{{ placement.public_id }}" {% if report_filters.placement == placement.public_id|stringformat:'s' %}selected{% endif %}>{{ placement.website_name }} · {{ placement.name }}</option>{% endfor %}</select></label>
+      <label><span>Status</span><select name="status"><option value="all" {% if report_filters.status == 'all' %}selected{% endif %}>All states</option>{% for value,label in report_status_choices %}<option value="{{ value }}" {% if report_filters.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      <label><span>From</span><input type="date" name="start" value="{{ report_filters.start }}"></label><label><span>To</span><input type="date" name="end" value="{{ report_filters.end }}"></label>
+      <div class="actions"><button type="submit">Apply filters</button><a href="{% url 'offerwall:publisher-section' 'reports' %}">Clear</a></div>
+    </form>
+    <div class="ow-result-table-wrap"><table class="ow-result-table ow-conversion-report-table">
+      <thead><tr><th>Date</th><th>Transaction</th><th>Respondent</th><th>Placement</th><th>Survey</th><th>Status</th><th>Reward</th><th>Risk / hold</th></tr></thead><tbody>
+      {% for conversion in report_page %}<tr>
+        <td><strong>{{ conversion.created_at|date:'d M Y' }}</strong><small>{{ conversion.created_at|date:'H:i:s' }}</small></td>
+        <td><code class="ow-result-transaction">{{ conversion.source_transaction_id }}</code>{% if conversion.source_reference_id %}<small>Ref {{ conversion.source_reference_id }}</small>{% endif %}</td>
+        <td><strong>{{ conversion.external_user_id }}</strong><small>{{ conversion.click.public_id }}</small></td>
+        <td>{% if conversion.placement %}<strong>{{ conversion.placement.name }}</strong><small>{{ conversion.placement.app_id }}</small>{% else %}<strong>Direct wall</strong><small>No placement</small>{% endif %}</td>
+        <td><strong>{{ conversion.survey.name|default:'Untitled survey' }}</strong><code>{{ conversion.survey.local_id }}</code></td>
+        <td><span class="ow-result-status conversion-{{ conversion.status }}">{{ conversion.get_status_display }}</span>{% if conversion.decision_reason %}<small title="{{ conversion.decision_reason }}">{{ conversion.decision_reason|truncatechars:54 }}</small>{% endif %}</td>
+        <td><strong class="ow-result-money">{{ conversion.currency }} {{ conversion.supplier_amount|floatformat:2 }}</strong><small>Source {{ conversion.source_amount|floatformat:2 }}</small></td>
+        <td><strong>Risk {{ conversion.risk_score }}/100</strong><small>{% if conversion.requires_manual_review %}Manual review{% elif conversion.hold_until %}Until {{ conversion.hold_until|date:'d M H:i' }}{% else %}No hold{% endif %}</small></td>
+      </tr>{% empty %}<tr><td colspan="8" class="ow-result-empty"><strong>No conversions found</strong><span>Try a wider date range or clear the filters.</span></td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+    <footer class="ow-result-footer"><span>Showing {{ report_page.start_index }}–{{ report_page.end_index }} of {{ report_page.paginator.count }}</span>{% if report_page.paginator.num_pages > 1 %}<nav>{% if report_page.has_previous %}<a href="?{{ report_query }}&amp;page={{ report_page.previous_page_number }}">Previous</a>{% endif %}<strong>Page {{ report_page.number }} of {{ report_page.paginator.num_pages }}</strong>{% if report_page.has_next %}<a href="?{{ report_query }}&amp;page={{ report_page.next_page_number }}">Next</a>{% endif %}</nav>{% endif %}</footer>
+  </section>
+</section>
+{% endblock %}

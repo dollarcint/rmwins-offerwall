@@ -62,6 +62,30 @@ def wallet_summary(publisher: Publisher) -> dict:
             filter=Q(entry_type=RewardLedgerEntry.EntryType.REVERSAL),
             default=Decimal("0.00"),
         ),
+        pending=Sum(
+            "amount",
+            filter=Q(
+                entry_type=RewardLedgerEntry.EntryType.CREDIT,
+                status=RewardLedgerEntry.Status.PENDING,
+            ),
+            default=Decimal("0.00"),
+        ),
+        released=Sum(
+            "amount",
+            filter=Q(
+                entry_type=RewardLedgerEntry.EntryType.CREDIT,
+                status=RewardLedgerEntry.Status.AVAILABLE,
+            ),
+            default=Decimal("0.00"),
+        ),
+        voided=Sum(
+            "amount",
+            filter=Q(
+                entry_type=RewardLedgerEntry.EntryType.CREDIT,
+                status=RewardLedgerEntry.Status.VOIDED,
+            ),
+            default=Decimal("0.00"),
+        ),
     )
     payouts = publisher.payout_requests.aggregate(
         reserved=Sum(
@@ -77,17 +101,25 @@ def wallet_summary(publisher: Publisher) -> dict:
     )
     credits = (ledger["credits"] or Decimal("0.00")).quantize(MONEY_QUANTUM)
     reversals = (ledger["reversals"] or Decimal("0.00")).quantize(MONEY_QUANTUM)
+    pending = (ledger["pending"] or Decimal("0.00")).quantize(MONEY_QUANTUM)
+    released = (ledger["released"] or Decimal("0.00")).quantize(MONEY_QUANTUM)
+    voided = (ledger["voided"] or Decimal("0.00")).quantize(MONEY_QUANTUM)
     reserved = (payouts["reserved"] or Decimal("0.00")).quantize(MONEY_QUANTUM)
     paid = (payouts["paid"] or Decimal("0.00")).quantize(MONEY_QUANTUM)
-    net_earnings = credits - reversals
-    available = max(Decimal("0.00"), net_earnings - reserved - paid)
+    net_earnings = released
+    available = max(Decimal("0.00"), released - reserved - paid)
+    exposure = max(Decimal("0.00"), reserved + paid - released)
     return {
         "credits": credits,
         "reversals": reversals,
         "net_earnings": net_earnings,
+        "pending": pending,
+        "released": released,
+        "voided": voided,
         "reserved": reserved,
         "paid": paid,
         "available": available,
+        "exposure": exposure,
         "currency": publisher.currency,
         "minimum_payout": settings.OFFERWALL_MINIMUM_PAYOUT,
     }
@@ -105,6 +137,10 @@ def request_withdrawal(
     with transaction.atomic():
         locked_publisher = Publisher.objects.select_for_update().get(pk=publisher.pk)
         summary = wallet_summary(locked_publisher)
+        if summary["exposure"] > 0:
+            raise ValidationError(
+                "Withdrawals are paused while a reversed-balance adjustment is outstanding."
+            )
         if amount > summary["available"]:
             raise ValidationError("Withdrawal amount exceeds the available balance.")
         return PublisherPayoutRequest.objects.create(

@@ -17,6 +17,13 @@ from .models import PostbackDelivery
 from .security import decrypt_placement_postback_secret, decrypt_signing_secret
 
 
+@shared_task(name="offerwall.release_due_rewards")
+def release_due_rewards_task():
+    from .services import release_due_conversions
+
+    return {"released": release_due_conversions()}
+
+
 def _validated_callback_url(url: str) -> str:
     parsed = urlsplit(str(url or "").strip())
     allowed_schemes = {"http", "https"} if settings.DEBUG else {"https"}

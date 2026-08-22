@@ -1,0 +1,56 @@
+{% extends 'offerwall/admin_base.html' %}
+{% block title %}Conversions · RM Wins Admin{% endblock %}
+{% block page_name %}Conversions{% endblock %}
+{% block content %}
+<section class="rmw-admin-page-heading">
+  <div><p class="rmw-admin-kicker">Reward operations</p><h1>Conversion review queue</h1><p>Release legitimate supplier rewards, investigate risk signals and preserve a complete decision trail.</p></div>
+  <span class="rmw-admin-live"><i></i>{{ conversion_stats.pending }} pending · {{ conversion_stats.manual }} manual</span>
+</section>
+
+<section class="rmw-admin-stat-grid rmw-admin-stat-grid-compact">
+  <article class="accent"><span>Pending liability</span><strong>{% for row in pending_currency_rows %}{% if not forloop.first %} · {% endif %}{{ row.currency }} {{ row.value|floatformat:2 }}{% empty %}—{% endfor %}</strong><small>{{ conversion_stats.pending }} conversion{{ conversion_stats.pending|pluralize }}</small></article>
+  <article><span>Manual review</span><strong>{{ conversion_stats.manual }}</strong><small>risk threshold reached</small></article>
+  <article><span>Approved</span><strong>{{ conversion_stats.approved }}</strong><small>released rewards</small></article>
+  <article><span>Rejected / reversed</span><strong>{{ conversion_stats.rejected }}</strong><small>protected decisions</small></article>
+</section>
+
+<section class="rmw-admin-card rmw-admin-filter-card">
+  <form method="get" class="rmw-admin-filter-grid">
+    <label class="wide"><span>Search</span><input type="search" name="q" value="{{ filters.q }}" placeholder="Transaction, respondent, survey or supplier"></label>
+    <label><span>Status</span><select name="status"><option value="all" {% if filters.status == 'all' %}selected{% endif %}>All states</option>{% for value,label in status_choices %}<option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label><span>Review type</span><select name="review"><option value="all" {% if filters.review == 'all' %}selected{% endif %}>All</option><option value="manual" {% if filters.review == 'manual' %}selected{% endif %}>Manual</option><option value="automatic" {% if filters.review == 'automatic' %}selected{% endif %}>Automatic</option></select></label>
+    <label><span>Supplier</span><select name="publisher"><option value="">All suppliers</option>{% for publisher in publishers %}<option value="{{ publisher.public_id }}" {% if filters.publisher == publisher.public_id|stringformat:'s' %}selected{% endif %}>{{ publisher.name }}</option>{% endfor %}</select></label>
+    <button type="submit">Apply</button><a href="{% url 'offerwall:admin-conversions' %}">Reset</a>
+  </form>
+</section>
+
+<section class="rmw-admin-card rmw-admin-table-card">
+  <div class="rmw-admin-card-head"><div><span>Decision ledger</span><h2>{{ page.paginator.count }} matching conversions</h2></div><small>All amounts use the conversion snapshot</small></div>
+  <div class="rmw-admin-conversion-list">
+    {% for conversion in page.object_list %}
+    <article class="rmw-admin-conversion-row">
+      <div class="rmw-admin-conversion-main">
+        <div><span class="rmw-admin-status {{ conversion.status }}">{{ conversion.get_status_display }}</span>{% if conversion.requires_manual_review %}<span class="rmw-admin-review-chip">Manual review</span>{% endif %}</div>
+        <h3>{{ conversion.survey.name|default:'Untitled survey' }}</h3>
+        <p><strong>{{ conversion.publisher.name }}</strong> · respondent {{ conversion.external_user_id }} · survey {{ conversion.survey.local_id }}</p>
+        <code>{{ conversion.source_transaction_id }}</code>
+      </div>
+      <dl class="rmw-admin-conversion-values">
+        <div><dt>Supplier reward</dt><dd>{{ conversion.currency }} {{ conversion.supplier_amount|floatformat:2 }}</dd></div>
+        <div><dt>Source CPI</dt><dd>{{ conversion.currency }} {{ conversion.source_amount|floatformat:2 }}</dd></div>
+        <div><dt>Risk score</dt><dd class="risk-{{ conversion.risk_score }}">{{ conversion.risk_score }}/100</dd></div>
+        <div><dt>Hold until</dt><dd>{% if conversion.hold_until %}{{ conversion.hold_until|date:'d M Y H:i' }}{% else %}—{% endif %}</dd></div>
+      </dl>
+      <div class="rmw-admin-risk-reasons">
+        {% for reason in conversion.risk_reasons %}<span title="{{ reason.message }}">+{{ reason.points }} {{ reason.code }}</span>{% empty %}<span class="clear">No risk signals</span>{% endfor %}
+        {% if conversion.decision_reason %}<p><strong>Decision:</strong> {{ conversion.decision_reason }}{% if conversion.decided_by %} · {{ conversion.decided_by.username }}{% endif %}</p>{% endif %}
+      </div>
+      {% if conversion.status == 'pending' %}
+      <form method="post" class="rmw-admin-conversion-action">{% csrf_token %}<input type="hidden" name="conversion_id" value="{{ conversion.public_id }}"><input type="text" name="reason" maxlength="500" placeholder="Decision note (required for rejection)"><button type="submit" name="action" value="approve" class="approve">Approve &amp; release</button><button type="submit" name="action" value="reject" class="reject">Reject</button></form>
+      {% endif %}
+    </article>
+    {% empty %}<p class="rmw-admin-empty">No conversions match these filters.</p>{% endfor %}
+  </div>
+  <nav class="rmw-admin-pagination" aria-label="Conversion pages">{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&amp;q={{ filters.q|urlencode }}&amp;status={{ filters.status }}&amp;review={{ filters.review }}&amp;publisher={{ filters.publisher }}">← Previous</a>{% else %}<span></span>{% endif %}<strong>{{ page.number }} / {{ page.paginator.num_pages }}</strong>{% if page.has_next %}<a href="?page={{ page.next_page_number }}&amp;q={{ filters.q|urlencode }}&amp;status={{ filters.status }}&amp;review={{ filters.review }}&amp;publisher={{ filters.publisher }}">Next →</a>{% else %}<span></span>{% endif %}</nav>
+</section>
+{% endblock %}

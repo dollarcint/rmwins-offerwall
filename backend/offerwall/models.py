@@ -100,6 +100,19 @@ class Publisher(models.Model):
         validators=PERCENTAGE_VALIDATORS,
         help_text="Percentage of source CPI credited to this publisher.",
     )
+    reward_hold_hours = models.PositiveIntegerField(
+        default=72,
+        validators=[MaxValueValidator(720)],
+        help_text=(
+            "Hours a verified conversion remains pending before supplier earnings "
+            "become withdrawable. Existing integrations can use zero for immediate release."
+        ),
+    )
+    risk_review_threshold = models.PositiveSmallIntegerField(
+        default=70,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Conversions at or above this risk score require manual approval.",
+    )
     currency = models.CharField(max_length=3, default="USD")
     is_active = models.BooleanField(default=True, db_index=True)
     encrypted_signing_secret = models.TextField(blank=True, editable=False)
@@ -688,21 +701,162 @@ class OfferClick(models.Model):
         return f"{self.publisher.slug} · {self.survey.local_id} · {self.external_user_id}"
 
 
+class OfferConversion(models.Model):
+    """One authoritative financial decision for an attributed Offerwall click."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending hold"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+        REVERSED = "reversed", "Reversed"
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    click = models.OneToOneField(
+        OfferClick,
+        on_delete=models.PROTECT,
+        related_name="conversion",
+    )
+    publisher = models.ForeignKey(
+        Publisher,
+        on_delete=models.PROTECT,
+        related_name="conversions",
+    )
+    placement = models.ForeignKey(
+        PublisherPlacement,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="conversions",
+    )
+    survey = models.ForeignKey(
+        "surveys.Survey",
+        on_delete=models.PROTECT,
+        related_name="offerwall_conversions",
+    )
+    external_user_id = models.CharField(max_length=160, db_index=True)
+    source_transaction_id = models.CharField(max_length=160, db_index=True)
+    source_reference_id = models.CharField(max_length=160, blank=True, db_index=True)
+    source_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    supplier_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=3)
+    status = models.CharField(
+        max_length=12,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    risk_score = models.PositiveSmallIntegerField(
+        default=0,
+        validators=[MaxValueValidator(100)],
+    )
+    risk_reasons = models.JSONField(default=list, blank=True)
+    requires_manual_review = models.BooleanField(default=False, db_index=True)
+    hold_until = models.DateTimeField(null=True, blank=True, db_index=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    reversed_at = models.DateTimeField(null=True, blank=True)
+    decision_reason = models.CharField(max_length=500, blank=True)
+    decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="decided_offerwall_conversions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["publisher", "source_transaction_id"],
+                name="unique_publisher_conversion_transaction",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["status", "requires_manual_review", "hold_until"],
+                name="conversion_release_queue_idx",
+            ),
+            models.Index(
+                fields=["publisher", "status", "-created_at"],
+                name="pub_conversion_status_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.publisher.slug} · {self.source_transaction_id} · {self.status}"
+
+
+class OfferConversionEvent(models.Model):
+    """Immutable state-change audit trail for a conversion."""
+
+    class EventType(models.TextChoices):
+        CREATED = "created", "Created"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+        REVERSED = "reversed", "Reversed"
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    conversion = models.ForeignKey(
+        OfferConversion,
+        on_delete=models.PROTECT,
+        related_name="events",
+    )
+    event_type = models.CharField(max_length=16, choices=EventType.choices, db_index=True)
+    idempotency_key = models.CharField(max_length=200, unique=True)
+    payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["created_at", "pk"]
+        indexes = [
+            models.Index(
+                fields=["conversion", "event_type", "created_at"],
+                name="conversion_event_timeline_idx",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.conversion.public_id} · {self.event_type}"
+
+
 class RewardLedgerEntry(models.Model):
     class EntryType(models.TextChoices):
         CREDIT = "credit", "Credit"
         REVERSAL = "reversal", "Reversal"
 
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending hold"
+        AVAILABLE = "available", "Available"
+        VOIDED = "voided", "Voided"
+
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     publisher = models.ForeignKey(Publisher, on_delete=models.PROTECT, related_name="reward_ledger")
     click = models.ForeignKey(OfferClick, on_delete=models.PROTECT, related_name="ledger_entries")
+    conversion = models.ForeignKey(
+        OfferConversion,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="ledger_entries",
+    )
     survey = models.ForeignKey("surveys.Survey", on_delete=models.PROTECT, related_name="offerwall_ledger")
     external_user_id = models.CharField(max_length=160, db_index=True)
     entry_type = models.CharField(max_length=12, choices=EntryType.choices, db_index=True)
+    status = models.CharField(
+        max_length=12,
+        choices=Status.choices,
+        default=Status.AVAILABLE,
+        db_index=True,
+    )
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     currency = models.CharField(max_length=3)
     idempotency_key = models.CharField(max_length=160, unique=True)
     reason = models.CharField(max_length=255, blank=True)
+    available_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    released_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

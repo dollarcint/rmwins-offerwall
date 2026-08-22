@@ -25,6 +25,11 @@ urlpatterns = [
         name="admin-suppliers",
     ),
     path(
+        "admin-portal/conversions/",
+        views.admin_portal_conversions,
+        name="admin-conversions",
+    ),
+    path(
         "admin-portal/activity/",
         views.admin_portal_activity,
         name="admin-activity",

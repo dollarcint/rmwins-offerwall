@@ -8,19 +8,21 @@
   </header>
   <div class="ow-wallet-grid">
     <article class="primary"><small>Available balance</small><strong>{{ wallet.currency }} {{ wallet.available|floatformat:2 }}</strong><span>Ready to withdraw</span></article>
-    <article><small>Net earnings</small><strong>{{ wallet.currency }} {{ wallet.net_earnings|floatformat:2 }}</strong><span>Credits minus reversals</span></article>
+    <article class="pending"><small>Pending rewards</small><strong>{{ wallet.currency }} {{ wallet.pending|floatformat:2 }}</strong><span>In hold or manual review</span></article>
+    <article><small>Approved earnings</small><strong>{{ wallet.currency }} {{ wallet.net_earnings|floatformat:2 }}</strong><span>Currently valid rewards</span></article>
     <article><small>Reserved</small><strong>{{ wallet.currency }} {{ wallet.reserved|floatformat:2 }}</strong><span>Pending and processing</span></article>
     <article><small>Paid</small><strong>{{ wallet.currency }} {{ wallet.paid|floatformat:2 }}</strong><span>Completed withdrawals</span></article>
   </div>
   <div class="ow-publisher-stats">
     <span><strong>{{ placement_count }}</strong> Placements</span><span><strong>{{ stats.clicks }}</strong> Clicks</span><span><strong>{{ stats.users }}</strong> Respondents</span><span><strong>{{ stats.verified_completes }}</strong> Verified completes</span>
   </div>
+  {% if wallet.exposure > 0 %}<div class="ow-wallet-exposure"><strong>Balance adjustment in progress</strong><span>{{ wallet.currency }} {{ wallet.exposure|floatformat:2 }} is outstanding after a provider reversal. New withdrawals are paused until it is recovered.</span></div>{% endif %}
   <div class="ow-publisher-layout">
     <section class="ow-panel">
       <header><div><span class="ow-eyebrow"><i></i> Recent activity</span><h2>Reward ledger</h2></div></header>
-      <div class="ow-table-wrap"><table><thead><tr><th>Date</th><th>User</th><th>Offer</th><th>Type</th><th>Amount</th></tr></thead><tbody>
-      {% for entry in ledger_entries %}<tr><td>{{ entry.created_at|date:'d M Y H:i' }}</td><td class="mono">{{ entry.external_user_id }}</td><td>{{ entry.survey.name|default:entry.survey.local_id }}</td><td><span class="ow-status {{ entry.entry_type }}">{{ entry.get_entry_type_display }}</span></td><td class="ow-money {% if entry.entry_type == 'reversal' %}negative{% endif %}">{% if entry.entry_type == 'reversal' %}−{% else %}+{% endif %}{{ entry.currency }} {{ entry.amount|floatformat:2 }}</td></tr>
-      {% empty %}<tr><td colspan="5" class="ow-table-empty">No verified reward activity yet.</td></tr>{% endfor %}
+      <div class="ow-table-wrap"><table><thead><tr><th>Date</th><th>User</th><th>Offer</th><th>Type</th><th>State</th><th>Amount</th></tr></thead><tbody>
+      {% for entry in ledger_entries %}<tr><td>{{ entry.created_at|date:'d M Y H:i' }}</td><td class="mono">{{ entry.external_user_id }}</td><td>{{ entry.survey.name|default:entry.survey.local_id }}</td><td><span class="ow-status {{ entry.entry_type }}">{{ entry.get_entry_type_display }}</span></td><td><span class="ow-status {{ entry.status }}">{{ entry.get_status_display }}</span></td><td class="ow-money {% if entry.entry_type == 'reversal' or entry.status == 'voided' %}negative{% endif %}">{% if entry.entry_type == 'reversal' %}−{% else %}+{% endif %}{{ entry.currency }} {{ entry.amount|floatformat:2 }}</td></tr>
+      {% empty %}<tr><td colspan="6" class="ow-table-empty">No verified reward activity yet.</td></tr>{% endfor %}
       </tbody></table></div>
     </section>
     <aside class="ow-panel ow-withdrawal-panel" id="cashout">
@@ -30,7 +32,7 @@
         <label>Amount<input name="amount" type="number" min="{{ wallet.minimum_payout }}" max="{{ wallet.available }}" step="0.01" required placeholder="0.00"></label>
         <label>Payout method<select name="payout_method" required><option value="">Select method</option>{% for method in payout_methods %}<option>{{ method }}</option>{% endfor %}</select></label>
         <label>Payment note<textarea name="publisher_note" maxlength="500" rows="3" placeholder="Account label or payout instructions. Do not enter passwords."></textarea></label>
-        <button type="submit" class="ow-button primary wide" {% if wallet.available < wallet.minimum_payout %}disabled{% endif %}>Submit withdrawal</button>
+        <button type="submit" class="ow-button primary wide" {% if wallet.available < wallet.minimum_payout or wallet.exposure > 0 %}disabled{% endif %}>Submit withdrawal</button>
       </form>
     </aside>
   </div>

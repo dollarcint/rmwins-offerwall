@@ -7,7 +7,7 @@
   <meta name="color-scheme" content="light">
   <title>{% block title %}RM Wins Admin{% endblock %}</title>
   {% include 'includes/favicon_links.html' %}
-  <link rel="stylesheet" href="{% static 'offerwall/admin_portal.css' %}?v=2">
+  <link rel="stylesheet" href="{% static 'offerwall/admin_portal.css' %}?v=3">
 </head>
 <body class="rmw-admin-body">
   <div class="rmw-admin-app">
@@ -20,6 +20,7 @@
         <a class="{% if admin_active_page == 'dashboard' %}active{% endif %}" href="{% url 'offerwall:admin-dashboard' %}"><span>▦</span>Dashboard</a>
         <a class="{% if admin_active_page == 'inventory' %}active{% endif %}" href="{% url 'offerwall:admin-inventory' %}"><span>◫</span>Inventory</a>
         <a class="{% if admin_active_page == 'suppliers' %}active{% endif %}" href="{% url 'offerwall:admin-suppliers' %}"><span>◎</span>Suppliers &amp; cuts</a>
+        <a class="{% if admin_active_page == 'conversions' %}active{% endif %}" href="{% url 'offerwall:admin-conversions' %}"><span>✓</span>Conversions</a>
         <a class="{% if admin_active_page == 'activity' %}active{% endif %}" href="{% url 'offerwall:admin-activity' %}"><span>↗</span>Activity</a>
       </nav>
       <div class="rmw-admin-sidebar-foot">

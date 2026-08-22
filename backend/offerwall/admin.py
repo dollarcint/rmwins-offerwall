@@ -10,6 +10,8 @@ from django.utils.html import format_html
 from .forms import PublisherAdminForm
 from .models import (
     OfferClick,
+    OfferConversion,
+    OfferConversionEvent,
     OfferOverride,
     OfferwallAdminPortalAccount,
     PlacementEventPostback,
@@ -89,7 +91,15 @@ class PublisherAdmin(admin.ModelAdmin):
         ("Publisher", {"fields": ["name", "slug", "publisher_number", "public_id", "service_user", "is_active"]}),
         (
             "Commercial",
-            {"fields": ["payout_percent", "currency", "wallet_summary_display"]},
+            {
+                "fields": [
+                    "payout_percent",
+                    "currency",
+                    "reward_hold_hours",
+                    "risk_review_threshold",
+                    "wallet_summary_display",
+                ]
+            },
         ),
         ("Postback", {"fields": ["postback_enabled", "callback_url"]}),
         (
@@ -447,10 +457,68 @@ class OfferClickAdmin(admin.ModelAdmin):
     readonly_fields = [field.name for field in OfferClick._meta.fields]
 
 
+@admin.register(OfferConversion)
+class OfferConversionAdmin(admin.ModelAdmin):
+    list_display = [
+        "public_id",
+        "publisher",
+        "external_user_id",
+        "survey",
+        "status",
+        "supplier_amount",
+        "currency",
+        "risk_score",
+        "requires_manual_review",
+        "hold_until",
+        "created_at",
+    ]
+    list_filter = [
+        "status",
+        "requires_manual_review",
+        "publisher",
+        "currency",
+        "created_at",
+    ]
+    search_fields = [
+        "public_id",
+        "source_transaction_id",
+        "source_reference_id",
+        "external_user_id",
+        "survey__local_id",
+    ]
+    readonly_fields = [field.name for field in OfferConversion._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(OfferConversionEvent)
+class OfferConversionEventAdmin(admin.ModelAdmin):
+    list_display = ["public_id", "conversion", "event_type", "created_at"]
+    list_filter = ["event_type", "created_at"]
+    search_fields = ["public_id", "conversion__public_id", "idempotency_key"]
+    readonly_fields = [field.name for field in OfferConversionEvent._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(RewardLedgerEntry)
 class RewardLedgerEntryAdmin(admin.ModelAdmin):
-    list_display = ["public_id", "publisher", "external_user_id", "survey", "entry_type", "amount", "currency", "created_at"]
-    list_filter = ["publisher", "entry_type", "currency", "created_at"]
+    list_display = ["public_id", "publisher", "external_user_id", "survey", "entry_type", "status", "amount", "currency", "available_at", "created_at"]
+    list_filter = ["publisher", "entry_type", "status", "currency", "created_at"]
     search_fields = ["public_id", "external_user_id", "click__public_id", "survey__local_id", "idempotency_key"]
     readonly_fields = [field.name for field in RewardLedgerEntry._meta.fields]
 

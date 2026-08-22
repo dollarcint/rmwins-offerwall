@@ -1,0 +1,77 @@
+.ow-wallet-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.ow-wallet-grid article.pending {
+  border-color: #f2dfa4;
+  background: #fffbeb;
+}
+
+.ow-wallet-grid article.pending strong {
+  color: #92630b;
+}
+
+.ow-status.pending,
+.ow-result-status.conversion-pending {
+  background: #fff4d8;
+  color: #92630b;
+}
+
+.ow-status.available,
+.ow-result-status.conversion-approved {
+  background: #e7f8f1;
+  color: #087654;
+}
+
+.ow-status.voided,
+.ow-result-status.conversion-rejected,
+.ow-result-status.conversion-reversed {
+  background: #fff0f2;
+  color: #ab3043;
+}
+
+.ow-conversion-report-stats {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.ow-conversion-report-table {
+  min-width: 1180px;
+}
+
+.ow-wallet-exposure {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 13px 15px;
+  border: 1px solid #f0c2ca;
+  border-radius: 12px;
+  background: #fff4f5;
+  color: #8f2f41;
+  font-size: 12px;
+}
+
+.ow-wallet-exposure span {
+  color: #a65362;
+}
+
+@media (max-width: 1250px) {
+  .ow-wallet-grid,
+  .ow-conversion-report-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .ow-wallet-grid,
+  .ow-conversion-report-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 460px) {
+  .ow-wallet-grid,
+  .ow-conversion-report-stats {
+    grid-template-columns: 1fr;
+  }
+}
