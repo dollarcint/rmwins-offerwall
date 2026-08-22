@@ -6,6 +6,14 @@ from . import views
 app_name = "offerwall"
 
 urlpatterns = [
+    path("admin-portal/login/", views.admin_portal_login, name="admin-login"),
+    path(
+        "admin-portal/password/",
+        views.admin_portal_password_change,
+        name="admin-password-change",
+    ),
+    path("admin-portal/logout/", views.admin_portal_logout, name="admin-logout"),
+    path("admin-portal/", views.admin_portal_dashboard, name="admin-dashboard"),
     path("wall/<slug:publisher_slug>/", views.wall_entry, name="entry"),
     path("wall/session/<uuid:visit_id>/", views.wall_session, name="session"),
     path(

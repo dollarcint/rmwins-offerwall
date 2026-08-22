@@ -44,6 +44,29 @@ class PublisherNumberSequence(models.Model):
     next_value = models.PositiveBigIntegerField(default=1, editable=False)
 
 
+class OfferwallAdminPortalAccount(models.Model):
+    """Explicit membership for the isolated Offerwall administration portal."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="offerwall_admin_portal_account",
+    )
+    must_change_password = models.BooleanField(default=True, db_index=True)
+    last_password_change_at = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["user__username"]
+        verbose_name = "Offerwall admin portal account"
+        verbose_name_plural = "Offerwall admin portal accounts"
+
+    def __str__(self):
+        return self.user.username
+
+
 class Publisher(models.Model):
     """One external publisher/application embedding the RM Wins offerwall."""
 

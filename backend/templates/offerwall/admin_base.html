@@ -1,0 +1,45 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{% block title %}RM Wins Admin{% endblock %}</title>
+  {% include 'includes/favicon_links.html' %}
+  <link rel="stylesheet" href="{% static 'offerwall/admin_portal.css' %}?v=1">
+</head>
+<body class="rmw-admin-body">
+  <div class="rmw-admin-app">
+    <aside class="rmw-admin-sidebar">
+      <a class="rmw-admin-brand" href="{% url 'offerwall:admin-dashboard' %}">
+        <span class="rmw-admin-logo"><i></i><i></i><i></i></span>
+        <span><strong>RM Wins</strong><small>Administration</small></span>
+      </a>
+      <nav aria-label="Admin navigation">
+        <a class="active" href="{% url 'offerwall:admin-dashboard' %}"><span>▦</span>Dashboard</a>
+        <a href="{% url 'offerwall:admin-dashboard' %}#inventory"><span>◫</span>Inventory</a>
+        <a href="{% url 'offerwall:admin-dashboard' %}#suppliers"><span>◎</span>Suppliers &amp; cuts</a>
+        <a href="{% url 'offerwall:admin-dashboard' %}#activity"><span>↗</span>Recent activity</a>
+      </nav>
+      <div class="rmw-admin-sidebar-foot">
+        <a href="{% url 'offerwall:admin-password-change' %}">Change password</a>
+        <form method="post" action="{% url 'offerwall:admin-logout' %}">
+          {% csrf_token %}
+          <button type="submit">Sign out</button>
+        </form>
+      </div>
+    </aside>
+    <section class="rmw-admin-stage">
+      <header class="rmw-admin-toolbar">
+        <div><small>Offerwall control center</small><strong>{% block page_name %}Dashboard{% endblock %}</strong></div>
+        <div class="rmw-admin-user"><span>{{ admin_account.user.username|slice:':1'|upper }}</span><p><strong>{{ admin_account.user.username }}</strong><small>Platform administrator</small></p></div>
+      </header>
+      <main class="rmw-admin-main">
+        {% if messages %}<div class="rmw-admin-messages">{% for message in messages %}<p class="{{ message.tags }}">{{ message }}</p>{% endfor %}</div>{% endif %}
+        {% block content %}{% endblock %}
+      </main>
+    </section>
+  </div>
+</body>
+</html>

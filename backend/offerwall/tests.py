@@ -17,6 +17,7 @@ from vendors.models import Client
 from .models import (
     OfferClick,
     OfferOverride,
+    OfferwallAdminPortalAccount,
     PlacementEventPostback,
     PostbackDelivery,
     Publisher,
@@ -396,6 +397,133 @@ class OfferwallFlowTests(TestCase):
         self.assertContains(response, "Create supplier account")
         self.assertContains(response, reverse("offerwall:supplier-login"))
         self.assertContains(response, reverse("offerwall:supplier-signup"))
+
+    def test_offerwall_admin_login_requires_portal_membership_and_forces_password_change(self):
+        admin_user = get_user_model().objects.create_user(
+            username="admin-portal-owner",
+            email="admin@rmwins.example",
+            password="Temporary-Admin-9831",
+            is_staff=True,
+            is_superuser=True,
+        )
+        account = OfferwallAdminPortalAccount.objects.create(user=admin_user)
+
+        response = self.client.post(
+            reverse("offerwall:admin-login"),
+            {
+                "username": admin_user.username,
+                "password": "Temporary-Admin-9831",
+            },
+        )
+        self.assertRedirects(
+            response,
+            reverse("offerwall:admin-password-change"),
+            fetch_redirect_response=False,
+        )
+        self.assertNotIn("_auth_user_id", self.client.session)
+        self.assertRedirects(
+            self.client.get(reverse("offerwall:admin-dashboard")),
+            reverse("offerwall:admin-password-change"),
+            fetch_redirect_response=False,
+        )
+
+        weak = self.client.post(
+            reverse("offerwall:admin-password-change"),
+            {
+                "current_password": "Temporary-Admin-9831",
+                "new_password1": "short1",
+                "new_password2": "short1",
+            },
+        )
+        self.assertEqual(weak.status_code, 200)
+        self.assertContains(weak, "Use at least 12 characters")
+
+        changed = self.client.post(
+            reverse("offerwall:admin-password-change"),
+            {
+                "current_password": "Temporary-Admin-9831",
+                "new_password1": "Private-RMWins-4086",
+                "new_password2": "Private-RMWins-4086",
+            },
+        )
+        self.assertRedirects(
+            changed,
+            reverse("offerwall:admin-dashboard"),
+            fetch_redirect_response=False,
+        )
+        account.refresh_from_db()
+        self.assertFalse(account.must_change_password)
+        self.assertTrue(admin_user.__class__.objects.get(pk=admin_user.pk).check_password("Private-RMWins-4086"))
+
+        dashboard = self.client.get(reverse("offerwall:admin-dashboard"))
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertContains(dashboard, "Live inventory")
+        self.assertContains(dashboard, "Suppliers &amp; current cuts")
+
+    def test_offerwall_admin_login_rejects_supplier_and_unregistered_staff_accounts(self):
+        supplier_user = get_user_model().objects.create_user(
+            username="admin-route-supplier",
+            email="supplier-admin-route@example.test",
+            password="Supplier-Password-9472",
+        )
+        supplier_publisher = Publisher.objects.create(
+            name="Admin Route Supplier",
+            slug="admin-route-supplier",
+            is_active=True,
+        )
+        PublisherPortalAccount.objects.create(
+            user=supplier_user,
+            publisher=supplier_publisher,
+            contact_name="Supplier Owner",
+            business_email="supplier-admin-route@example.test",
+            phone="+1 555 0100",
+            country="United States",
+            status=PublisherPortalAccount.Status.APPROVED,
+        )
+        staff_user = get_user_model().objects.create_user(
+            username="legacy-staff-only",
+            password="Legacy-Staff-9472",
+            is_staff=True,
+        )
+
+        for username, password in (
+            (supplier_user.username, "Supplier-Password-9472"),
+            (staff_user.username, "Legacy-Staff-9472"),
+        ):
+            response = self.client.post(
+                reverse("offerwall:admin-login"),
+                {"username": username, "password": password},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, "Username or password is incorrect")
+            self.assertRedirects(
+                self.client.get(reverse("offerwall:admin-dashboard")),
+                reverse("offerwall:admin-login"),
+                fetch_redirect_response=False,
+            )
+
+    def test_offerwall_admin_dashboard_shows_country_inventory_and_cut_snapshot(self):
+        admin_user = get_user_model().objects.create_user(
+            username="dashboard-admin",
+            password="Dashboard-Admin-9472",
+            is_staff=True,
+        )
+        OfferwallAdminPortalAccount.objects.create(
+            user=admin_user,
+            must_change_password=False,
+        )
+        self.client.post(
+            reverse("offerwall:admin-login"),
+            {"username": admin_user.username, "password": "Dashboard-Admin-9472"},
+        )
+
+        response = self.client.get(reverse("offerwall:admin-dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "US")
+        self.assertContains(response, "70.00%")
+        self.assertContains(response, "30.00%")
+        self.assertContains(response, "Recent offer activity")
 
     def test_supplier_registration_creates_pending_inactive_account(self):
         response = self.client.post(

@@ -11,6 +11,7 @@ from .forms import PublisherAdminForm
 from .models import (
     OfferClick,
     OfferOverride,
+    OfferwallAdminPortalAccount,
     PlacementEventPostback,
     PostbackDelivery,
     Publisher,
@@ -29,6 +30,20 @@ from .wallet import transition_payout, wallet_summary
 admin.site.site_header = "RM Wins Offerwall Administration"
 admin.site.site_title = "RM Wins Offerwall Admin"
 admin.site.index_title = "Offerwall operations"
+
+
+@admin.register(OfferwallAdminPortalAccount)
+class OfferwallAdminPortalAccountAdmin(admin.ModelAdmin):
+    list_display = [
+        "user",
+        "must_change_password",
+        "last_password_change_at",
+        "last_seen_at",
+        "created_at",
+    ]
+    list_filter = ["must_change_password", "created_at"]
+    search_fields = ["user__username", "user__email"]
+    readonly_fields = ["last_password_change_at", "last_seen_at", "created_at", "updated_at"]
 
 
 class OfferOverrideInline(admin.TabularInline):

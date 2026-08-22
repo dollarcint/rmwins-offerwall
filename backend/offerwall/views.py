@@ -21,7 +21,7 @@ from django.core import signing
 from django.core.cache import caches
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import Count, DecimalField, Max, Prefetch, Q, Sum, Value
+from django.db.models import Avg, Count, DecimalField, Max, Prefetch, Q, Sum, Value
 from django.db.models.functions import Coalesce
 from django.core.paginator import Paginator
 from django.http import (
@@ -50,6 +50,8 @@ from surveys.models import Survey, SurveyAttempt
 from surveys.outcomes import provider_outcome
 
 from .forms import (
+    AdminPortalLoginForm,
+    AdminPortalPasswordChangeForm,
     PlacementCurrencyForm,
     PlacementDesignForm,
     PlacementEventPostbackForm,
@@ -64,6 +66,7 @@ from .forms import (
 )
 from .models import (
     OfferClick,
+    OfferwallAdminPortalAccount,
     PlacementEventPostback,
     PostbackDelivery,
     Publisher,
@@ -106,6 +109,7 @@ USER_ID_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,160}$")
 APP_ID_RE = re.compile(r"^(?:RMW_APP_|ID_)([0-9a-fA-F]{32})$")
 PORTAL_SESSION_KEY = "offerwall_publisher_id"
 SUPPLIER_ACCOUNT_SESSION_KEY = "offerwall_supplier_publisher_id"
+ADMIN_PORTAL_SESSION_KEY = "offerwall_admin_user_id"
 RESPONDENT_STATE_SALT = "offerwall.respondent.onboarding.v1"
 logger = logging.getLogger(__name__)
 
@@ -329,6 +333,211 @@ def _supplier_account(request):
         request.session.pop(SUPPLIER_ACCOUNT_SESSION_KEY, None)
         return None
     return account
+
+
+def _admin_portal_account(request):
+    user_id = request.session.get(ADMIN_PORTAL_SESSION_KEY)
+    if not user_id:
+        return None
+    account = (
+        OfferwallAdminPortalAccount.objects.select_related("user")
+        .filter(
+            user_id=user_id,
+            user__is_active=True,
+            user__is_staff=True,
+        )
+        .first()
+    )
+    if account is None:
+        request.session.pop(ADMIN_PORTAL_SESSION_KEY, None)
+    return account
+
+
+def _admin_portal_or_response(request, *, allow_password_change=False):
+    account = _admin_portal_account(request)
+    if account is None:
+        login_url = reverse("offerwall:admin-login")
+        return None, _no_store(HttpResponseRedirect(login_url))
+    if account.must_change_password and not allow_password_change:
+        return None, _no_store(
+            HttpResponseRedirect(reverse("offerwall:admin-password-change"))
+        )
+    return account, None
+
+
+@require_http_methods(["GET", "POST"])
+def admin_portal_login(request):
+    existing = _admin_portal_account(request)
+    if existing:
+        destination = (
+            "offerwall:admin-password-change"
+            if existing.must_change_password
+            else "offerwall:admin-dashboard"
+        )
+        return _no_store(HttpResponseRedirect(reverse(destination)))
+
+    if request.method == "POST":
+        if login_request_body_too_large(request):
+            return _error(request, "Login request too large", "Please try again.", status=413)
+        form = AdminPortalLoginForm(request.POST)
+        username = str(request.POST.get("username") or "").strip()
+        if not consume_login_attempt(request, username):
+            response = _error(
+                request,
+                "Too many login attempts",
+                "Please wait a few minutes and try again.",
+                status=429,
+            )
+            response["Retry-After"] = str(settings.AUTH_LOGIN_WINDOW_SECONDS)
+            return response
+        if form.is_valid():
+            user = authenticate(
+                request,
+                username=form.cleaned_data["username"],
+                password=form.cleaned_data["password"],
+            )
+            account = (
+                OfferwallAdminPortalAccount.objects.select_related("user")
+                .filter(user=user, user__is_active=True, user__is_staff=True)
+                .first()
+                if user
+                else None
+            )
+            if account:
+                request.session.cycle_key()
+                request.session[ADMIN_PORTAL_SESSION_KEY] = account.user_id
+                reset_login_account_attempts(account.user.username)
+                request.session.set_expiry(
+                    settings.OFFERWALL_PORTAL_SESSION_TTL_SECONDS
+                    if form.cleaned_data.get("remember_me")
+                    else 0
+                )
+                destination = (
+                    "offerwall:admin-password-change"
+                    if account.must_change_password
+                    else "offerwall:admin-dashboard"
+                )
+                return _no_store(HttpResponseRedirect(reverse(destination)))
+            form.add_error(None, "Username or password is incorrect.")
+    else:
+        form = AdminPortalLoginForm()
+    return _no_store(render(request, "offerwall/admin_login.html", {"form": form}))
+
+
+@require_http_methods(["GET", "POST"])
+def admin_portal_password_change(request):
+    account, denied = _admin_portal_or_response(
+        request, allow_password_change=True
+    )
+    if denied:
+        return denied
+    form = AdminPortalPasswordChangeForm(
+        request.POST or None,
+        user=account.user,
+    )
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        request.session.cycle_key()
+        request.session[ADMIN_PORTAL_SESSION_KEY] = account.user_id
+        messages.success(request, "Admin password updated successfully.")
+        return _no_store(
+            HttpResponseRedirect(reverse("offerwall:admin-dashboard"))
+        )
+    return _no_store(
+        render(
+            request,
+            "offerwall/admin_password_change.html",
+            {"form": form, "admin_account": account},
+        )
+    )
+
+
+@require_GET
+def admin_portal_dashboard(request):
+    account, denied = _admin_portal_or_response(request)
+    if denied:
+        return denied
+    now = timezone.now()
+    since = now - timedelta(hours=24)
+    inventory = Survey.objects.filter(
+        status=Survey.Status.LIVE,
+        remaining__gt=0,
+        cpi__gt=0,
+    )
+    country_inventory = list(
+        inventory.exclude(country_code="")
+        .values("country_code")
+        .annotate(
+            survey_count=Count("id"),
+            available_completes=Sum("remaining"),
+            average_cpi=Avg("cpi"),
+        )
+        .order_by("-survey_count", "country_code")[:12]
+    )
+    publishers = list(
+        Publisher.objects.select_related("portal_account")
+        .annotate(
+            placement_count=Count("placements", distinct=True),
+            respondent_count=Count("respondents", distinct=True),
+        )
+        .order_by("-updated_at")[:8]
+    )
+    for publisher in publishers:
+        publisher.platform_cut_percent = Decimal("100.00") - publisher.payout_percent
+
+    completed_clicks = OfferClick.objects.filter(
+        status=SurveyAttempt.Status.COMPLETED,
+        is_verified=True,
+        created_at__gte=since,
+    )
+    value_summary = completed_clicks.aggregate(
+        source_value=Sum("source_cpi_snapshot"),
+        supplier_value=Sum("payout_snapshot"),
+    )
+    source_value = value_summary["source_value"] or Decimal("0.00")
+    supplier_value = value_summary["supplier_value"] or Decimal("0.00")
+    OfferwallAdminPortalAccount.objects.filter(pk=account.pk).update(
+        last_seen_at=now
+    )
+    context = {
+        "admin_account": account,
+        "admin_active_page": "dashboard",
+        "dashboard_counts": {
+            "live_inventory": inventory.count(),
+            "countries": inventory.exclude(country_code="")
+            .values("country_code")
+            .distinct()
+            .count(),
+            "approved_suppliers": PublisherPortalAccount.objects.filter(
+                status=PublisherPortalAccount.Status.APPROVED
+            ).count(),
+            "pending_suppliers": PublisherPortalAccount.objects.filter(
+                status=PublisherPortalAccount.Status.PENDING
+            ).count(),
+            "active_placements": PublisherPlacement.objects.filter(
+                status=PublisherPlacement.Status.ACTIVE
+            ).count(),
+            "visits_24h": WallVisit.objects.filter(created_at__gte=since).count(),
+            "clicks_24h": OfferClick.objects.filter(created_at__gte=since).count(),
+            "completes_24h": completed_clicks.count(),
+        },
+        "country_inventory": country_inventory,
+        "publishers": publishers,
+        "recent_clicks": OfferClick.objects.select_related(
+            "publisher", "survey", "visit"
+        ).order_by("-created_at")[:8],
+        "source_value_24h": source_value,
+        "supplier_value_24h": supplier_value,
+        "platform_margin_24h": source_value - supplier_value,
+    }
+    return _no_store(render(request, "offerwall/admin_dashboard.html", context))
+
+
+@require_POST
+def admin_portal_logout(request):
+    request.session.pop(ADMIN_PORTAL_SESSION_KEY, None)
+    request.session.cycle_key()
+    return _no_store(HttpResponseRedirect(reverse("offerwall:admin-login")))
 
 
 @require_http_methods(["GET", "POST"])

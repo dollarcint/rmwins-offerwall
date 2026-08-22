@@ -1,0 +1,39 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Admin login · RM Wins</title>
+  {% include 'includes/favicon_links.html' %}
+  <link rel="stylesheet" href="{% static 'offerwall/admin_portal.css' %}?v=1">
+</head>
+<body class="rmw-admin-auth-body">
+  <main class="rmw-admin-auth-shell">
+    <section class="rmw-admin-auth-story">
+      <a href="/" class="rmw-admin-auth-brand"><span><i></i><i></i><i></i></span><strong>RM Wins</strong></a>
+      <div>
+        <p class="rmw-admin-kicker">Private administration</p>
+        <h1>Control inventory,<br>margin and growth.</h1>
+        <p>One secured workspace for supplier approvals, live survey coverage and platform performance.</p>
+      </div>
+      <small>Protected access · Rate limited · Separate supplier sessions</small>
+    </section>
+    <section class="rmw-admin-auth-panel">
+      <form method="post" class="rmw-admin-auth-card">
+        {% csrf_token %}
+        <p class="rmw-admin-kicker">Administrator access</p>
+        <h2>Sign in to RM Wins</h2>
+        <p class="rmw-admin-auth-copy">Use your Offerwall administrator credentials.</p>
+        {% if form.non_field_errors %}<div class="rmw-admin-error">Username or password is incorrect.</div>{% endif %}
+        <label><span>Username</span>{{ form.username }}{% for error in form.username.errors %}<small>{{ error }}</small>{% endfor %}</label>
+        <label><span>Password</span>{{ form.password }}{% for error in form.password.errors %}<small>{{ error }}</small>{% endfor %}</label>
+        <label class="rmw-admin-check">{{ form.remember_me }}<span>Keep me signed in</span></label>
+        <button type="submit">Sign in <span>→</span></button>
+        <a class="rmw-admin-supplier-link" href="{% url 'offerwall:supplier-login' %}">Supplier login</a>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

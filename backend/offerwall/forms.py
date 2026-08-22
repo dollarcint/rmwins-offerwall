@@ -5,10 +5,12 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from surveys.models import Survey
 
 from .models import (
+    OfferwallAdminPortalAccount,
     PlacementEventPostback,
     Publisher,
     PublisherPlacement,
@@ -64,6 +66,95 @@ class SupplierLoginForm(forms.Form):
         ),
     )
     remember_me = forms.BooleanField(required=False, initial=True, label="Keep me signed in")
+
+
+class AdminPortalLoginForm(forms.Form):
+    username = forms.CharField(
+        max_length=150,
+        widget=forms.TextInput(
+            attrs={
+                "autocomplete": "username",
+                "autofocus": True,
+                "placeholder": "Admin username",
+            }
+        ),
+    )
+    password = forms.CharField(
+        max_length=1024,
+        strip=False,
+        widget=forms.PasswordInput(
+            attrs={"autocomplete": "current-password", "placeholder": "Password"}
+        ),
+    )
+    remember_me = forms.BooleanField(required=False, initial=False, label="Keep me signed in")
+
+
+class AdminPortalPasswordChangeForm(forms.Form):
+    current_password = forms.CharField(
+        max_length=1024,
+        strip=False,
+        widget=forms.PasswordInput(
+            attrs={"autocomplete": "current-password", "placeholder": "Current password"}
+        ),
+    )
+    new_password1 = forms.CharField(
+        max_length=1024,
+        strip=False,
+        label="New password",
+        widget=forms.PasswordInput(
+            attrs={"autocomplete": "new-password", "placeholder": "New password"}
+        ),
+    )
+    new_password2 = forms.CharField(
+        max_length=1024,
+        strip=False,
+        label="Confirm new password",
+        widget=forms.PasswordInput(
+            attrs={"autocomplete": "new-password", "placeholder": "Confirm new password"}
+        ),
+    )
+
+    def __init__(self, *args, user, **kwargs):
+        self.user = user
+        super().__init__(*args, **kwargs)
+
+    def clean_current_password(self):
+        value = self.cleaned_data["current_password"]
+        if not self.user.check_password(value):
+            raise ValidationError("Current password is incorrect.")
+        return value
+
+    def clean_new_password1(self):
+        value = self.cleaned_data["new_password1"]
+        if len(value) < 12:
+            raise ValidationError("Use at least 12 characters.")
+        if not any(character.isalpha() for character in value) or not any(
+            character.isdigit() for character in value
+        ):
+            raise ValidationError("Include at least one letter and one number.")
+        validate_password(value, user=self.user)
+        return value
+
+    def clean(self):
+        cleaned = super().clean()
+        first = cleaned.get("new_password1")
+        second = cleaned.get("new_password2")
+        if first and second and first != second:
+            self.add_error("new_password2", "Passwords do not match.")
+        if first and self.user.check_password(first):
+            self.add_error("new_password1", "Choose a password you have not just used.")
+        return cleaned
+
+    def save(self):
+        self.user.set_password(self.cleaned_data["new_password1"])
+        self.user.save(update_fields=["password"])
+        account = OfferwallAdminPortalAccount.objects.get(user=self.user)
+        account.must_change_password = False
+        account.last_password_change_at = timezone.now()
+        account.save(
+            update_fields=["must_change_password", "last_password_change_at", "updated_at"]
+        )
+        return account
 
 
 class SupplierSignupForm(forms.Form):
